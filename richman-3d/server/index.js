@@ -148,11 +148,12 @@ io.on('connection', (socket) => {
       if (res.error) return ack?.({ ok: false, error: res.error });
       switchRoom(res.room.code);
       socket.join(res.room.code);
+      // 先回 ack（客户端据其设置房间），再补发对局状态，避免竞态丢包
+      ack?.({ ok: true, me: res.room.players.find((p) => p.id === playerId), room: rooms.roomState(res.room), chat: res.room.chat });
       if (res.room.started && res.room.engine) {
         socket.emit('game:state', { __room: res.room.code, state: res.room.engine.snapshot() });
         socket.emit('game:timer', { __room: res.room.code, deadline: res.room.turnDeadline, seconds: config.TURN_SECONDS });
       }
-      ack?.({ ok: true, me: res.room.players.find((p) => p.id === playerId), room: rooms.roomState(res.room), chat: res.room.chat });
     } catch (e) {
       ack?.({ ok: false, error: e.message });
     }
