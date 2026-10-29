@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>大富翁 3D · Richman 3D</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>" />
+  <link rel="stylesheet" href="./src/style.css" />
+  <script>
+    // 早期错误捕获（调试面板用）
+    window.__errs = [];
+    addEventListener('error', (e) => window.__errs.push((e.message || 'error') + ' @ ' + (e.filename || '') + ':' + e.lineno));
+    addEventListener('unhandledrejection', (e) => window.__errs.push('REJ: ' + (e.reason?.stack || e.reason)));
+  </script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- ══════════ 大厅 ══════════ -->
+  <div id="lobby" class="screen">
+    <div class="lobby-glow"></div>
+    <div class="lobby-box glass">
+      <div class="logo">
+        <div class="logo-dice">🎲</div>
+        <h1>大富翁 <span class="logo-3d">3D</span></h1>
+        <p class="slogan">星夜都会 · 谁是最后的大亨？</p>
+      </div>
+
+      <div class="lobby-form" id="lobbyForm">
+        <label class="field">
+          <span>昵称</span>
+          <input id="nameInput" maxlength="12" placeholder="起个响亮的名字" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>角色</span>
+          <div id="avatarRow" class="avatar-row"></div>
+        </label>
+        <div class="btn-row">
+          <button id="btnCreate" class="btn btn-gold big">🎲 创建房间</button>
+        </div>
+        <div class="join-row">
+          <input id="codeInput" maxlength="4" placeholder="房间码" class="code-input" autocomplete="off" />
+          <button id="btnJoin" class="btn btn-glass big">加入房间</button>
+        </div>
+        <p id="lobbyError" class="lobby-error"></p>
+      </div>
+
+      <div class="lobby-room hidden" id="lobbyRoom">
+        <div class="room-code-line">
+          <span>房间码</span>
+          <b id="roomCode" class="room-code">----</b>
+          <button id="btnCopy" class="btn btn-mini">复制邀请</button>
+        </div>
+        <div id="playerList" class="player-list"></div>
+        <p class="room-hint">把房间码告诉朋友，2~6 人开局</p>
+        <div class="btn-row">
+          <button id="btnStart" class="btn btn-gold big hidden">🚀 开始对局</button>
+          <p id="waitHost" class="wait-host">等待房主开始…</p>
+          <button id="btnLeave" class="btn btn-mini ghost">离开房间</button>
+        </div>
+      </div>
+
+      <div class="lobby-foot">
+        <span>Three.js 3D 棋盘 · Socket.IO 联机 · WebRTC 语音</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 对局 HUD ══════════ -->
+  <div id="hud" class="screen hidden">
+    <div class="topbar">
+      <div class="hud-room glass-mini">
+        <span id="hudRound" class="hud-round">第 1 回合</span>
+        <span class="hud-code" id="hudCode" title="点击复制邀请链接">ROOM</span>
+      </div>
+      <div id="playerCards" class="player-cards"></div>
+      <div class="hud-tools">
+        <button id="btnSound" class="icon-btn" title="音效">🔊</button>
+        <button id="btnMic" class="icon-btn" title="语音开关">🎙️</button>
+        <button id="btnChat" class="icon-btn" title="聊天">💬</button>
+      </div>
+    </div>
+
+    <div id="announce" class="announce"></div>
+
+    <div class="actionbar">
+      <div id="statusText" class="status-text">…</div>
+      <div class="action-buttons">
+        <div id="jailActions" class="hidden">
+          <button id="btnPayJail" class="btn btn-glass">支付保释 ¥500</button>
+          <button id="btnUseCard" class="btn btn-glass">使用许可证</button>
+        </div>
+        <button id="btnRoll" class="btn btn-gold big hidden">🎲 掷骰子</button>
+        <button id="btnBuy" class="btn btn-gold big hidden">💸 买下它</button>
+        <button id="btnDecline" class="btn btn-glass big hidden">放弃</button>
+        <button id="btnEnd" class="btn btn-glass big hidden">结束回合 ⏎</button>
+      </div>
+      <div class="turn-timer" id="turnTimer"><div class="turn-timer-fill" id="turnTimerFill"></div></div>
+    </div>
+
+    <!-- 聊天抽屉 -->
+    <div id="chatDrawer" class="chat-drawer glass hidden">
+      <div class="chat-tabs">
+        <button class="chat-tab active" data-tab="chat">💬 聊天</button>
+        <button class="chat-tab" data-tab="log">📜 战报</button>
+        <button class="chat-close" id="btnChatClose">✕</button>
+      </div>
+      <div id="chatList" class="chat-list"></div>
+      <div id="logList" class="chat-list hidden"></div>
+      <div class="chat-input-row">
+        <div class="emoji-row" id="emojiRow"></div>
+        <div class="chat-send-row">
+          <input id="chatInput" maxlength="200" placeholder="说点什么… (回车发送)" autocomplete="off" />
+          <button id="btnSend" class="btn btn-gold">发送</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 地契弹窗 -->
+    <div id="deedModal" class="modal hidden">
+      <div class="deed glass" id="deedCard"></div>
+    </div>
+
+    <!-- 结算 -->
+    <div id="overModal" class="modal hidden">
+      <div class="over glass">
+        <h2 id="overTitle">🏆</h2>
+        <div id="overRanking" class="over-ranking"></div>
+        <button id="btnBack" class="btn btn-gold">回到大厅</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
