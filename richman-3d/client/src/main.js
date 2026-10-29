@@ -11,6 +11,7 @@ import { initHud, renderAll, announce, showCard, openDeed, gameOver } from './ui
 import { initChat } from './ui/chat.js';
 import { voice } from './net/voice.js';
 import { sfx } from './audio/sfx.js';
+window.__openDeed = openDeed; // 自动化测试句柄
 
 /* ================= 3D 初始化 ================= */
 const canvas = document.getElementById('gl');
@@ -97,6 +98,7 @@ socket.on('connect', async () => {
       store.room = res.room;
       store.me = res.me;
       if (res.chat?.length && !store.chat.length) store.chat.push(...res.chat);
+      emit('room', res.room); // 通知语音层进房
       if (!wasInGame) toast('已连接到房间 ' + res.room.code);
       if (res.room.started) {
         enterGame();
@@ -155,8 +157,10 @@ function applyState(state) {
     const cur = state.players[state.turn];
     moveHighlight(board, cur?.pos ?? -1);
   }
-  if (!director.busy) snapTokens(state);
-  renderAll();
+  if (!director.busy) {
+    snapTokens(state);
+    renderAll();
+  } // 忙碌时延迟到动画队列结束再刷新（见 Director.run）
 }
 
 function snapTokens(state) {
@@ -186,7 +190,10 @@ class Director {
       }
     }
     this.busy = false;
-    if (store.snap) snapTokens(store.snap);
+    if (store.snap) {
+      snapTokens(store.snap);
+      renderAll(); // 动画播完后才亮出操作按钮，节奏更从容
+    }
   }
 
   tokenPos(id) {
