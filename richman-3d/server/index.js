@@ -136,6 +136,29 @@ io.on('connection', (socket) => {
     if (room) socket.to(room.code).emit('voice:mute', { peer: socket.id, muted: !!muted });
   });
 
+  socket.on('room:rejoin', ({ code, playerId } = {}, ack) => {
+    try {
+      const res = rooms.rejoin(String(code || '').toUpperCase(), playerId, socket.id);
+      if (res.error) return ack?.({ ok: false, error: res.error });
+      bind(res.room.code);
+      if (res.room.started && res.room.engine) {
+        socket.emit('game:state', { state: res.room.engine.snapshot() });
+        socket.emit('game:timer', { deadline: res.room.turnDeadline, seconds: config.TURN_SECONDS });
+      }
+      ack?.({ ok: true, me: res.room.players.find((p) => p.id === playerId), room: rooms.roomState(res.room), chat: res.room.chat });
+    } catch (e) {
+      ack?.({ ok: false, error: e.message });
+    }
+  });
+
+  socket.on('room:leave', () => {
+    if (roomCode) {
+      rooms.removePlayer(roomCode, socket.id);
+      socket.leave(roomCode);
+      roomCode = null;
+    }
+  });
+
   socket.on('disconnect', () => {
     if (roomCode) rooms.leaveRoom(roomCode, socket.id);
   });

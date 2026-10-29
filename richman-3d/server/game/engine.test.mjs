@@ -55,15 +55,19 @@ function playRandomGame(seedLog = false) {
     console.error(JSON.stringify(e.snapshot(), null, 2));
     process.exit(1);
   }
-  // 金额守恒：银行 (startMoney*players + 工资*∞ - 税…) 不易精确守恒，退而验证非负与合理
-  const money = totalMoney(e);
+  // 金额守恒：所有玩家现金之和 = 初始总额 - 银行净流入
+  const expected = startMoney - e.bankFlow;
+  const actual = totalMoney(e);
+  if (Math.abs(actual - expected) > 1e-6) {
+    console.error('MONEY LEAK!', { actual, expected, bankFlow: e.bankFlow });
+    process.exit(1);
+  }
   e.players.forEach((p) => {
-    if (p.money < 0 || p.money > startMoney * 3) {
-      console.error('MONEY OUT OF RANGE:', p.name, p.money);
+    if (p.money < 0) {
+      console.error('NEGATIVE MONEY:', p.name, p.money);
       process.exit(1);
     }
   });
-  void money; void startMoney;
   if (seedLog) console.log('  log tail:', e.log.slice(-3));
   return steps;
 }

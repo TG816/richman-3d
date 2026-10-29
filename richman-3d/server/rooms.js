@@ -62,14 +62,14 @@ export class RoomManager {
     return { room };
   }
 
-  leaveRoom(code, sid) {
+  /** 主动离开：立即移除席位（区别于掉线宽限） */
+  removePlayer(code, sid) {
     const room = this.rooms.get(code);
     if (!room) return;
     const idx = room.players.findIndex((p) => p.sid === sid);
     if (idx === -1) return;
     const [p] = room.players.splice(idx, 1);
-    if (room.started && room.engine) {
-      // 对局中离开 = 破产出局
+    if (room.engine && room.started) {
       const gp = room.engine.players.find((x) => x.id === p.id);
       if (gp && !gp.bankrupt && room.engine.phase !== 'gameover') {
         room.engine.bankruptPlayer(gp, null);
@@ -77,17 +77,75 @@ export class RoomManager {
         room.broadcast('game:state', { state: room.engine.snapshot() });
       }
     }
-    if (room.players.length === 0) {
-      this.destroyRoom(code);
-    } else {
-      room.broadcast('room:state', this.roomState(room));
+    if (room.players.length === 0) return this.destroyRoom(code);
+    room.broadcast('room:state', this.roomState(room));
+  }
+
+  /** 掉线：保留席位 30 秒等待重连，期间对局照常由超时器托管 */
+  leaveRoom(code, sid) {
+    const room = this.rooms.get(code);
+    if (!room) return;
+    const p = room.players.find((x) => x.sid === sid);
+    if (!p || p.disconnected) return;
+    p.disconnected = true;
+    p.sid = null;
+    p.discAt = Date.now();
+    if (room.players.every((x) => x.disconnected)) return this.destroyRoom(code);
+    room.broadcast('room:state', this.roomState(room));
+    this.broadcastChat(room, { system: true, text: `${p.name} 掉线了，30 秒内可重连…` });
+    clearTimeout(room.sweepTimer);
+    room.sweepTimer = setTimeout(() => this.sweepDisconnected(code), 30_000);
+  }
+
+  /** 宽限期结束：仍未重连则正式移除（对局中按破产处理） */
+  sweepDisconnected(code) {
+    const room = this.rooms.get(code);
+    if (!room) return;
+    const gone = room.players.filter((p) => p.disconnected);
+    room.players = room.players.filter((p) => !p.disconnected);
+    for (const p of gone) {
+      if (room.engine && room.started) {
+        const gp = room.engine.players.find((x) => x.id === p.id);
+        if (gp && !gp.bankrupt && room.engine.phase !== 'gameover') {
+          room.engine.bankruptPlayer(gp, null);
+        }
+      }
     }
+    if (room.engine && room.started) {
+      room.broadcast('game:events', { events: room.engine.drainEvents() });
+      room.broadcast('game:state', { state: room.engine.snapshot() });
+      if (room.engine.phase !== 'gameover') this.armTurnTimer(room);
+    }
+    if (room.players.length === 0) return this.destroyRoom(code);
+    room.broadcast('room:state', this.roomState(room));
+  }
+
+  /** 重连：按持久化的 playerId 找回席位 */
+  rejoin(code, playerId, sid) {
+    const room = this.rooms.get(code);
+    if (!room) return { error: '房间不存在或已解散' };
+    const p = room.players.find((x) => x.id === playerId);
+    if (!p) return { error: '你已不在该房间中' };
+    p.sid = sid;
+    p.disconnected = false;
+    clearTimeout(room.sweepTimer);
+    room.broadcast('room:state', this.roomState(room));
+    this.broadcastChat(room, { system: true, text: `${p.name} 重新连接了` });
+    return { room };
+  }
+
+  broadcastChat(room, msg) {
+    const m = { id: randomUUID().slice(0, 8), ts: Date.now(), ...msg };
+    room.chat.push(m);
+    if (room.chat.length > 200) room.chat.shift();
+    room.broadcast('chat:msg', m);
   }
 
   destroyRoom(code) {
     const room = this.rooms.get(code);
     if (!room) return;
     if (room.timer) clearTimeout(room.timer);
+    if (room.sweepTimer) clearTimeout(room.sweepTimer);
     this.rooms.delete(code);
   }
 
@@ -95,7 +153,9 @@ export class RoomManager {
     return {
       code: room.code,
       started: room.started,
-      players: room.players.map((p) => ({ id: p.id, name: p.name, avatarId: p.avatarId })),
+      players: room.players.map((p) => ({
+        id: p.id, name: p.name, avatarId: p.avatarId, disconnected: !!p.disconnected,
+      })),
       hostSid: room.players[0]?.sid ?? null,
       maxPlayers: config.MAX_PLAYERS,
     };
@@ -104,9 +164,10 @@ export class RoomManager {
   /* ---------- 对局 ---------- */
 
   startGame(room) {
-    if (room.started || room.players.length < 2) return false;
+    const online = room.players.filter((p) => !p.disconnected);
+    if (room.started || online.length < 2) return false;
     room.started = true;
-    room.engine = new GameEngine(room.players.map((p) => ({
+    room.engine = new GameEngine(online.map((p) => ({
       id: p.id, name: p.name, avatarId: p.avatarId,
       color: AVATARS.find((a) => a.id === p.avatarId)?.color || '#e2504a',
     })));

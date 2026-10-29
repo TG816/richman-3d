@@ -38,6 +38,7 @@ export class GameEngine {
     this.discard = { chance: [], fate: [] };
     this.dice = [1, 1];
     this.winner = null;
+    this.bankFlow = 0;          // 银行净流入（金额守恒校验用）
     this.events = [];
     this.log = [];
     this.addLog(`对局开始！${this.players.map((p) => p.name).join('、')} 各携 ¥${config.START_MONEY} 入场`);
@@ -91,7 +92,7 @@ export class GameEngine {
     const { tile } = this.pending;
     const t = BOARD[tile];
     if (p.money < t.price) return this.toast(`${p.name} 资金不足，无法购买`);
-    this.transfer(null, p.id, t.price, `购入「${t.name}」`);
+    this.transfer(p.id, null, t.price, `购入「${t.name}」`);
     this.props[tile] = { owner: p.id, houses: 0, mortgaged: false };
     this.emit({ type: 'buy', player: p.id, tile, price: t.price });
     this.addLog(`${p.name} 以 ¥${t.price} 购入「${t.name}」`);
@@ -120,7 +121,7 @@ export class GameEngine {
     const cost = GROUPS[t.group].houseCost;
     const p = this.players.find((x) => x.id === playerId);
     if (p.money < cost) return this.toast('资金不足');
-    this.transfer(null, playerId, cost, `在「${t.name}」施工`);
+    this.transfer(playerId, null, cost, `在「${t.name}」施工`);
     info.houses++;
     this.emit({ type: 'build', tile, houses: info.houses, player: playerId });
     this.addLog(`${p.name} 在「${t.name}」${info.houses === 5 ? '建成酒店 🏨' : `建成第 ${info.houses} 栋房 🏠`}`);
@@ -135,7 +136,7 @@ export class GameEngine {
     const min = Math.min(...group.map((i) => this.props[i]?.houses ?? 0));
     if (info.houses - 1 < min) return this.toast('需均匀拆房：请先拆同组最高的');
     const refund = GROUPS[t.group].houseCost / 2;
-    this.transfer(playerId, null, refund, `拆除「${t.name}」房屋`);
+    this.transfer(null, playerId, refund, `拆除「${t.name}」房屋`);
     info.houses--;
     this.emit({ type: 'build', tile, houses: info.houses, player: playerId });
     this.addLog(`${p.name} 拆卖「${t.name}」的房屋，回笼 ¥${refund}`);
@@ -153,7 +154,7 @@ export class GameEngine {
     }
     info.mortgaged = true;
     const gain = t.price / 2;
-    this.transfer(playerId, null, gain, `抵押「${t.name}」`);
+    this.transfer(null, playerId, gain, `抵押「${t.name}」`);
     this.emit({ type: 'mortgage', tile, mortgaged: true, player: playerId });
     this.addLog(`${p.name} 抵押「${t.name}」，获得 ¥${gain}`);
   }
@@ -165,7 +166,7 @@ export class GameEngine {
     const cost = Math.ceil(t.price / 2 * 1.1);
     const p = this.players.find((x) => x.id === playerId);
     if (p.money < cost) return this.toast('资金不足');
-    this.transfer(null, playerId, cost, `赎回「${t.name}」`);
+    this.transfer(playerId, null, cost, `赎回「${t.name}」`);
     info.mortgaged = false;
     this.emit({ type: 'mortgage', tile, mortgaged: false, player: playerId });
     this.addLog(`${p.name} 以 ¥${cost} 赎回「${t.name}」`);
@@ -458,6 +459,8 @@ export class GameEngine {
   /** 付款 from→to（null=银行）。资金不足自动拆房→抵押，仍不足则破产清算 */
   transfer(fromId, toId, amount, reason) {
     if (amount <= 0) return;
+    if (!fromId) this.bankFlow -= amount;   // 银行支出
+    if (!toId) this.bankFlow += amount;     // 银行收入
     const from = fromId ? this.players.find((p) => p.id === fromId) : null;
     const to = toId ? this.players.find((p) => p.id === toId) : null;
     if (from) {
@@ -475,6 +478,7 @@ export class GameEngine {
       while (p.money < need && info.houses > 0) {
         const t = BOARD[idx];
         info.houses--;
+        this.bankFlow -= GROUPS[t.group].houseCost / 2;
         p.money += GROUPS[t.group].houseCost / 2;
         this.emit({ type: 'build', tile: +idx, houses: info.houses, player: p.id, forced: true });
         this.addLog(`${p.name} 紧急拆除「${t.name}」的房屋套现`);
@@ -484,6 +488,7 @@ export class GameEngine {
       if (p.money < need && !info.mortgaged) {
         const t = BOARD[idx];
         info.mortgaged = true;
+        this.bankFlow -= t.price / 2;
         p.money += t.price / 2;
         this.emit({ type: 'mortgage', tile: +idx, mortgaged: true, player: p.id, forced: true });
         this.addLog(`${p.name} 紧急抵押「${t.name}」套现`);
@@ -497,6 +502,7 @@ export class GameEngine {
       if (info.owner !== p.id) continue;
       if (info.houses > 0) {
         const t = BOARD[idx];
+        this.bankFlow -= (info.houses * GROUPS[t.group].houseCost) / 2;
         p.money += (info.houses * GROUPS[t.group].houseCost) / 2;
         info.houses = 0;
         this.emit({ type: 'build', tile: +idx, houses: 0, player: p.id, forced: true });
