@@ -5,7 +5,7 @@ import { Tokens } from './three/tokens.js';
 import { Dice } from './three/dice.js';
 import { Effects } from './three/effects.js';
 import { socket, on } from './net/socket.js';
-import { store, emit, toast, playerById, currentPlayer } from './game/store.js';
+import { store, emit, on as onBus, toast, playerById, currentPlayer } from './game/store.js';
 import { initLobby, backToLobby } from './ui/lobby.js';
 import { initHud, renderAll, announce, showCard, openDeed, gameOver } from './ui/hud.js';
 import { initChat } from './ui/chat.js';
@@ -22,6 +22,7 @@ const dice = new Dice(scene3.scene);
 const effects = new Effects(scene3.scene);
 scene3.tickers.push((dt) => dice.update(dt));
 scene3.tickers.push((dt) => effects.update(dt));
+scene3.tickers.push((dt, t) => tokens.update(dt, t)); // 棋子动画（待机/跳跃）
 scene3.setAutoRotate(true);
 
 attachPicking(scene3.camera, canvas, board, (tileIndex) => {
@@ -59,30 +60,46 @@ document.getElementById('btnMic').onclick = async (e) => {
   e.currentTarget.classList.toggle('off', !onNow);
 };
 
+/* 换房间时清空旧房间残留（动画队列、弹窗、高亮） */
+onBus('room-switch', () => {
+  director.queue.length = 0;
+  director.busy = false;
+  director.ff = false;
+  dice.hide();
+  moveHighlight(board, -1);
+  document.getElementById('overModal').classList.add('hidden');
+  document.getElementById('deedModal').classList.add('hidden');
+});
+
 /* ================= Socket 事件 ================= */
 socket.connect(); // autoConnect 关闭，这里显式建链
-window.__richman = { socket, store, tokens, dice, board, effects, scene3 }; // 调试/自动化测试句柄
 
-on('room:state', ({ room }) => {
-  if (!store.room || room.code !== store.room.code) return;
+on('room:state', (room) => {
+  if (room.__room !== store.room?.code) return; // 丢弃旧房间残留广播
   const wasStarted = store.room.started;
   store.room = room;
   emit('room', room);
   if (room.started && !wasStarted) enterGame();
 });
 
-on('game:state', ({ state }) => {
+on('game:state', (payload) => {
+  if (payload.__room !== store.room?.code) return;
+  const state = payload.state;
   store.snap = state;
   applyState(state);
   emit('state', state);
   if (store.screen === 'lobby') enterGame();
 });
 
-on('game:events', ({ events }) => {
-  director.push(events);
-  emit('events', events); // UI 层（公告等）订阅
+on('game:events', (payload) => {
+  if (payload.__room !== store.room?.code) return;
+  director.push(payload.events);
+  emit('events', payload.events); // UI 层（公告等）订阅
 });
-on('game:timer', (t) => emit('timer', t));
+on('game:timer', (t) => {
+  if (t.__room !== store.room?.code) return;
+  emit('timer', t);
+});
 on('chat:msg', (msg) => emit('chat', msg));
 
 socket.on('connect', async () => {
@@ -151,7 +168,7 @@ function applyState(state) {
   if (state.phase === 'gameover') {
     moveHighlight(board, -1);
     if (state.winner && document.getElementById('overModal').classList.contains('hidden')) {
-      gameOver([], state.winner);
+      gameOver(state.ranking || [], state.winner);
     }
   } else {
     const cur = state.players[state.turn];
@@ -177,18 +194,21 @@ class Director {
   }
   push(events) {
     this.queue.push(...events);
+    if (this.queue.length > 24) this.ff = true; // 积压过多 → 快进
     if (!this.busy) this.run();
   }
   async run() {
     this.busy = true;
     while (this.queue.length) {
       const e = this.queue.shift();
+      const ff = this.ff;
       try {
-        await this.play(e);
+        await this.play(e, ff);
       } catch (err) {
         console.warn('[director]', e?.type, err);
       }
     }
+    this.ff = false;
     this.busy = false;
     if (store.snap) {
       snapTokens(store.snap);
@@ -201,7 +221,37 @@ class Director {
   }
   nameOf(id) { return playerById(id)?.name ?? '玩家'; }
 
-  async play(e) {
+  /** 快进：跳过动画直取结果（标签页休眠积压 / 长队尾） */
+  applyInstant(e) {
+    switch (e.type) {
+      case 'move': tokens.snapTo(e.player, e.path[e.path.length - 1]); break;
+      case 'jail': tokens.snapTo(e.player, 10); break;
+      case 'buy': {
+        const owner = playerById(e.player);
+        setTileOwner(board, e.tile, owner?.color);
+        break;
+      }
+      case 'build': setTileHouses(board, e.tile, e.houses); break;
+      case 'mortgage': {
+        const info = store.snap?.props?.[e.tile];
+        const owner = info && playerById(info.owner);
+        setTileOwner(board, e.tile, e.mortgaged ? '#5a6078' : owner?.color);
+        break;
+      }
+      case 'turn': {
+        const p = playerById(e.player);
+        if (p) { moveHighlight(board, p.pos); scene3.focusOn(tileWorldPos(p.pos, 0)); }
+        break;
+      }
+      case 'card': showCard(this.nameOf(e.player), e.card, e.deck); break;
+      case 'win': gameOver(e.ranking, e.winner); break;
+      case 'toast': toast(e.text, true); break;
+      default: break;
+    }
+  }
+
+  async play(e, ff = false) {
+    if (ff) return this.applyInstant(e);
     const fmtMoney = (n) => '¥' + n.toLocaleString('en-US');
     switch (e.type) {
       case 'dice': {
@@ -315,3 +365,8 @@ class Director {
 }
 
 const director = new Director();
+
+// 调试/自动化测试句柄（挂载在文件末尾，确保所有模块就绪）
+window.__richman = { socket, store, tokens, dice, board, effects, scene3, director };
+window.__richmanEvents = [];
+on('game:events', ({ events }) => window.__richmanEvents.push(...events.map(e => e.type)));

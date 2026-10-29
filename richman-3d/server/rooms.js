@@ -38,7 +38,7 @@ export class RoomManager {
       timer: null,
       turnDeadline: null,
       chat: [],              // 最近聊天记录（新人进房补发）
-      broadcast: (event, data) => this.io.to(code).emit(event, data),
+      broadcast: (event, data) => this.io.to(code).emit(event, { __room: code, ...data }),
     };
     this.rooms.set(code, room);
     this.joinRoom(code, host);
@@ -135,7 +135,7 @@ export class RoomManager {
   }
 
   broadcastChat(room, msg) {
-    const m = { id: randomUUID().slice(0, 8), ts: Date.now(), ...msg };
+    const m = { id: randomUUID().slice(0, 8), ts: Date.now(), name: '系统', avatarId: 'sys', ...msg };
     room.chat.push(m);
     if (room.chat.length > 200) room.chat.shift();
     room.broadcast('chat:msg', m);

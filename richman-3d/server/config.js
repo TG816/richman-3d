@@ -14,11 +14,11 @@ export const config = {
   // 是否由本服务托管前端静态产物（client/dist）。前后端分离部署时可设 SERVE_CLIENT=false
   SERVE_CLIENT: process.env.SERVE_CLIENT !== 'false',
   CLIENT_DIST: fileURLToPath(new URL('../client/dist/', import.meta.url)),
-  // 房间/对局参数
-  MAX_PLAYERS: 6,
+  // 房间/对局参数（均可环境变量覆盖，便于部署调参与快速测试）
+  MAX_PLAYERS: parseInt(process.env.MAX_PLAYERS || '6', 10),
   CODE_LEN: 4,
-  TURN_SECONDS: 75,   // 回合超时自动行动
-  ROUND_LIMIT: 50,    // 回合上限，到达后按总资产定胜负
-  START_MONEY: 15000, // 初始资金
-  SALARY: 2000,       // 经过起点工资
+  TURN_SECONDS: parseInt(process.env.TURN_SECONDS || '75', 10),   // 回合超时自动行动
+  ROUND_LIMIT: parseInt(process.env.ROUND_LIMIT || '50', 10),     // 回合上限，到达后按总资产定胜负
+  START_MONEY: parseInt(process.env.START_MONEY || '15000', 10),  // 初始资金
+  SALARY: parseInt(process.env.SALARY || '2000', 10),             // 经过起点工资
 };

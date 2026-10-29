@@ -32,7 +32,10 @@ export function initHud() {
   };
 
   $('deedModal').onclick = (e) => { if (e.target.id === 'deedModal') closeDeed(); };
-  $('btnBack').onclick = () => location.reload();
+  $('btnBack').onclick = () => {
+    sessionStorage.removeItem('richman.session'); // 结算后回大厅，不自动重连旧局
+    location.reload();
+  };
 
   /* 事件驱动的公告 */
   on('events', (events) => {
@@ -265,8 +268,6 @@ export function closeDeed() { $('deedModal').classList.add('hidden'); }
 /* ---------- 结算 ---------- */
 
 export function gameOver(ranking, winnerId) {
-  const s = store.snap;
-  if (s) s.phase = 'gameover';
   const modal = $('overModal');
   const title = $('overTitle');
   const w = playerById(winnerId);

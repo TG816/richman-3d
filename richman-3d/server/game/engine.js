@@ -38,6 +38,7 @@ export class GameEngine {
     this.discard = { chance: [], fate: [] };
     this.dice = [1, 1];
     this.winner = null;
+    this.lastRanking = null;    // 终局排名（含资产），供断线重连恢复结算画面
     this.bankFlow = 0;          // 银行净流入（金额守恒校验用）
     this.events = [];
     this.log = [];
@@ -433,11 +434,12 @@ export class GameEngine {
     this.winner = alive[0] || null;
     this.phase = 'gameover';
     this.addLog(`⏰ 达到 ${config.ROUND_LIMIT} 回合上限，按总资产结算：${this.winner.name} 以 ¥${worth(this.winner)} 夺冠！`);
+    this.lastRanking = alive.map((p) => ({ id: p.id, worth: worth(p) }));
     this.emit({
       type: 'win',
       winner: this.winner?.id ?? null,
       reason: 'assets',
-      ranking: alive.map((p) => ({ id: p.id, worth: worth(p) })),
+      ranking: this.lastRanking,
     });
   }
 
@@ -447,11 +449,12 @@ export class GameEngine {
     this.winner = alive[0] || null;
     this.phase = 'gameover';
     this.addLog(this.winner ? `🏆 ${this.winner.name} 笑到最后，赢得整场对局！` : '全员破产，无人幸存……');
+    this.lastRanking = alive.map((p) => ({ id: p.id, worth: p.money }));
     this.emit({
       type: 'win',
       winner: this.winner?.id ?? null,
       reason: 'last',
-      ranking: alive.map((p) => ({ id: p.id, worth: p.money })),
+      ranking: this.lastRanking,
     });
     return true;
   }
@@ -543,6 +546,7 @@ export class GameEngine {
       props: Object.fromEntries(Object.entries(this.props).map(([k, v]) => [k, { ...v }])),
       decksLeft: { chance: this.decks.chance.length, fate: this.decks.fate.length },
       winner: this.winner?.id ?? null,
+      ranking: this.phase === 'gameover' ? this.lastRanking ?? [] : undefined,
       log: this.log.slice(-40),
       config: { roundLimit: config.ROUND_LIMIT, turnSeconds: config.TURN_SECONDS, startMoney: config.START_MONEY, salary: config.SALARY },
     };

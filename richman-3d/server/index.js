@@ -52,15 +52,20 @@ if (config.SERVE_CLIENT) {
 io.on('connection', (socket) => {
   let roomCode = null;
 
-  const bind = (code) => {
-    socket.join(code);
+  /** 切房/进房前先离开旧房间，防止两房事件串流 */
+  const switchRoom = (code) => {
+    if (roomCode && roomCode !== code) {
+      rooms.removePlayer(roomCode, socket.id);
+      socket.leave(roomCode);
+    }
     roomCode = code;
   };
 
   socket.on('room:create', ({ name, avatarId } = {}, ack) => {
     try {
       const room = rooms.createRoom({ sid: socket.id, name, avatarId });
-      bind(room.code);
+      switchRoom(room.code);
+      socket.join(room.code);
       ack?.({ ok: true, code: room.code, me: room.players.at(-1), room: rooms.roomState(room), chat: [] });
       console.log(`[room] ${room.code} created by ${name}`);
     } catch (e) {
@@ -72,8 +77,9 @@ io.on('connection', (socket) => {
     try {
       const res = rooms.joinRoom(String(code || '').toUpperCase(), { sid: socket.id, name, avatarId });
       if (res.error) return ack?.({ ok: false, error: res.error });
-      bind(res.room.code);
-      socket.to(res.room.code).emit('room:state', rooms.roomState(res.room));
+      switchRoom(res.room.code);
+      socket.join(res.room.code);
+      socket.to(res.room.code).emit('room:state', { __room: res.room.code, ...rooms.roomState(res.room) });
       ack?.({ ok: true, code: res.room.code, me: res.room.players.at(-1), room: rooms.roomState(res.room), chat: res.room.chat });
       console.log(`[room] ${res.room.code} joined by ${name}`);
     } catch (e) {
@@ -140,10 +146,11 @@ io.on('connection', (socket) => {
     try {
       const res = rooms.rejoin(String(code || '').toUpperCase(), playerId, socket.id);
       if (res.error) return ack?.({ ok: false, error: res.error });
-      bind(res.room.code);
+      switchRoom(res.room.code);
+      socket.join(res.room.code);
       if (res.room.started && res.room.engine) {
-        socket.emit('game:state', { state: res.room.engine.snapshot() });
-        socket.emit('game:timer', { deadline: res.room.turnDeadline, seconds: config.TURN_SECONDS });
+        socket.emit('game:state', { __room: res.room.code, state: res.room.engine.snapshot() });
+        socket.emit('game:timer', { __room: res.room.code, deadline: res.room.turnDeadline, seconds: config.TURN_SECONDS });
       }
       ack?.({ ok: true, me: res.room.players.find((p) => p.id === playerId), room: rooms.roomState(res.room), chat: res.room.chat });
     } catch (e) {

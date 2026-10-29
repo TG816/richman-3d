@@ -43,8 +43,23 @@ export function initLobby() {
 
   const myName = () => nameInput.value.trim() || '玩家' + Math.floor(Math.random() * 90 + 10);
 
+  /** 进新房间前先离开旧房间（防止两房事件串流） */
+  function leaveCurrentRoom() {
+    if (!store.room) return;
+    socket.emit('room:leave');
+    store.room = null;
+    store.me = null;
+    store.snap = null;
+    store.chat = [];
+    sessionStorage.removeItem('richman.session');
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('lobby').classList.remove('hidden');
+    emit('room-switch'); // 清空动画队列/弹窗等旧房间残留
+  }
+
   $('btnCreate').onclick = async () => {
     savePrefs();
+    leaveCurrentRoom();
     const res = await emitAck('room:create', { name: myName(), avatarId });
     if (!res.ok) return showErr(res.error);
     enterRoom(res);
@@ -52,6 +67,7 @@ export function initLobby() {
 
   $('btnJoin').onclick = async () => {
     savePrefs();
+    leaveCurrentRoom();
     const code = codeInput.value.trim().toUpperCase();
     if (code.length !== 4) return showErr('请输入 4 位房间码');
     const res = await emitAck('room:join', { code, name: myName(), avatarId });
@@ -87,7 +103,7 @@ export function initLobby() {
   };
 
   /* 房间状态刷新（进出人员） */
-  on('room:state', ({ room }) => {
+  on('room:state', (room) => {
     if (!store.room || room.code !== store.room.code) return;
     store.room = room;
     renderRoom();
