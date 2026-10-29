@@ -104,6 +104,7 @@ export function initLobby() {
     formEl.classList.add('hidden');
     roomEl.classList.remove('hidden');
     if (res.chat?.length) store.chat.push(...res.chat);
+    emit('room', res.room); // 通知语音层进房
     renderRoom();
   }
 

@@ -64,16 +64,22 @@ export function initChat() {
 
 function appendMsg(msg) {
   const list = $('chatList');
-  const av = AVATARS.find((a) => a.id === msg.avatarId) || AVATARS[0];
   const el = document.createElement('div');
-  el.className = 'cmsg' + (msg.from === store.me?.id ? ' mine' : '');
-  el.dataset.msgId = msg.id;
-  el.innerHTML = `
-    <div class="dot" style="background:${av.color}"></div>
-    <div class="bubble">
-      <div class="cname">${escapeHtml(msg.name)}</div>
-      <div class="ctext">${escapeHtml(msg.text)}</div>
-    </div>`;
+  if (msg.system) {
+    el.className = 'logline';
+    el.style.textAlign = 'center';
+    el.style.color = '#7d86ad';
+    el.textContent = `—— ${msg.text} ——`;
+  } else {
+    const av = AVATARS.find((a) => a.id === msg.avatarId) || AVATARS[0];
+    el.className = 'cmsg' + (msg.from === store.me?.id ? ' mine' : '');
+    el.innerHTML = `
+      <div class="dot" style="background:${av.color}"></div>
+      <div class="bubble">
+        <div class="cname">${escapeHtml(msg.name)}</div>
+        <div class="ctext">${escapeHtml(msg.text)}</div>
+      </div>`;
+  }
   list.appendChild(el);
   list.scrollTop = list.scrollHeight;
   while (list.children.length > 120) list.firstChild.remove();
