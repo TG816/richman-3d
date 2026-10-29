@@ -162,14 +162,15 @@ export function escapeHtml(s) {
 /** 对局结束/离开后回到大厅 */
 export function backToLobby() {
   sessionStorage.removeItem('richman.session');
-  document.getElementById('hud').classList.add('hidden');
-  document.getElementById('lobby').classList.remove('hidden');
+  store.screen = 'lobby';
+  const inGame = false;
+  document.getElementById('lobby').classList.toggle('hidden', inGame);
+  document.getElementById('hud').classList.toggle('hidden', !inGame);
   document.getElementById('lobbyForm').classList.remove('hidden');
   document.getElementById('lobbyRoom').classList.add('hidden');
   store.room = null;
   store.me = null;
   store.snap = null;
-  store.screen = 'lobby';
   store.chat = [];
   emit('screen', 'lobby');
 }

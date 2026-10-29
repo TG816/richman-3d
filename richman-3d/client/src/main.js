@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createScene } from './three/scene.js';
-import { buildBoard, attachPicking, tileWorldPos, setTileOwner, setTileHouses, moveHighlight, pulseTile } from './three/board.js';
+import { buildBoard, attachPicking, tileWorldPos, cellDirs, setTileOwner, setTileHouses, moveHighlight, pulseTile } from './three/board.js';
 import { Tokens } from './three/tokens.js';
 import { Dice } from './three/dice.js';
 import { Effects } from './three/effects.js';
@@ -62,6 +62,7 @@ document.getElementById('btnMic').onclick = async (e) => {
 
 /* 换房间时清空旧房间残留（动画队列、弹窗、高亮） */
 onBus('room-switch', () => {
+  framedOnce = false;
   director.queue.length = 0;
   director.busy = false;
   director.ff = false;
@@ -69,6 +70,17 @@ onBus('room-switch', () => {
   moveHighlight(board, -1);
   document.getElementById('overModal').classList.add('hidden');
   document.getElementById('deedModal').classList.add('hidden');
+});
+
+/* 回到大厅：镜头拉远展示全城 */
+onBus('screen', (screen) => {
+  if (screen === 'lobby') {
+    framedOnce = false;
+    scene3.resetFocus();
+    scene3.setAutoRotate(true);
+    scene3.camera.position.set(30, 26, 34);
+    scene3.controls.target.set(0, 0, 0);
+  }
 });
 
 /* ================= Socket 事件 ================= */
@@ -82,14 +94,19 @@ on('room:state', (room) => {
   if (room.started && !wasStarted) enterGame();
 });
 
-on('game:state', (payload) => {
-  if (payload.__room !== store.room?.code) return;
+function handleGameState(payload) {
+  if (payload.__room !== store.room?.code) {
+    store.pendingState = payload; // 重连竞态：房间未就位时先暂存
+    return;
+  }
+  store.pendingState = null;
   const state = payload.state;
   store.snap = state;
   applyState(state);
   emit('state', state);
   if (store.screen === 'lobby') enterGame();
-});
+}
+on('game:state', handleGameState);
 
 on('game:events', (payload) => {
   if (payload.__room !== store.room?.code) return;
@@ -114,6 +131,12 @@ socket.on('connect', async () => {
       const wasInGame = store.screen === 'game';
       store.room = res.room;
       store.me = res.me;
+      // flush 重连期间暂存的对局状态
+      if (store.pendingState?.__room === res.room.code) {
+        const p = store.pendingState;
+        store.pendingState = null;
+        handleGameState(p);
+      }
       if (res.chat?.length && !store.chat.length) store.chat.push(...res.chat);
       emit('room', res.room); // 通知语音层进房
       if (!wasInGame) toast('已连接到房间 ' + res.room.code);
@@ -124,8 +147,15 @@ socket.on('connect', async () => {
         document.getElementById('lobbyRoom').classList.remove('hidden');
         emit('room', res.room);
       }
-    } else if (!store.room) {
+    } else {
+      // 重连失败：旧席位已不在，清理会话并回到大厅
       sessionStorage.removeItem('richman.session');
+      if (store.screen === 'game') {
+        toast('你已离开原房间', true);
+        backToLobby();
+      }
+      store.room = null;
+      store.me = null;
     }
   } catch { /* 忽略 */ }
 });
@@ -139,13 +169,20 @@ socket.on('connect_error', () => {
 });
 
 /* ================= 进入对局 ================= */
+function syncUI() {
+  const inGame = store.screen === 'game';
+  document.getElementById('lobby').classList.toggle('hidden', inGame);
+  document.getElementById('hud').classList.toggle('hidden', !inGame);
+}
+
+let framedOnce = false; // 进入对局后首帧镜头贴到当前角色（大富翁4式局部视角）
+
 function enterGame() {
   store.screen = 'game';
-  document.getElementById('lobby').classList.add('hidden');
-  document.getElementById('hud').classList.remove('hidden');
+  syncUI();
   scene3.setAutoRotate(false);
   const cur = currentPlayer();
-  if (cur) scene3.focusOn(tileWorldPos(cur.pos, 0), true);
+  if (cur) scene3.frameOn(tileWorldPos(cur.pos, 0), 16); // 局部视角：贴近角色
   renderAll();
   sfx.turn();
 }
@@ -178,6 +215,13 @@ function applyState(state) {
     snapTokens(state);
     renderAll();
   } // 忙碌时延迟到动画队列结束再刷新（见 Director.run）
+  if (!framedOnce && state.phase !== 'gameover') {
+    const cur = state.players[state.turn];
+    if (cur) {
+      scene3.frameOn(tileWorldPos(cur.pos, 0), 16);
+      framedOnce = true;
+    }
+  }
 }
 
 function snapTokens(state) {
@@ -255,12 +299,21 @@ class Director {
     const fmtMoney = (n) => '¥' + n.toLocaleString('en-US');
     switch (e.type) {
       case 'dice': {
-        scene3.focusOn(new THREE.Vector3(0, 0.6, 0));
+        // 骰子掷在当前角色身旁的街面上
+        const rec = tokens.map.get(e.player);
+        if (rec) {
+          const { t } = cellDirs(rec.tile);
+          const base = tileWorldPos(rec.tile, 0);
+          dice.group.position.set(base.x + t.x * 0.8, -0.15, base.z + t.z * 0.8);
+          scene3.focusOn(new THREE.Vector3(base.x, 0.4, base.z));
+        }
         await dice.roll(e.dice);
         break;
       }
       case 'move': {
         await tokens.walk(e.player, e.path);
+        const rec = tokens.map.get(e.player);
+        if (rec) scene3.focusOn(rec.group.position.clone().setY(0)); // 镜头随角色卷动
         break;
       }
       case 'salary': {
@@ -367,6 +420,6 @@ class Director {
 const director = new Director();
 
 // 调试/自动化测试句柄（挂载在文件末尾，确保所有模块就绪）
-window.__richman = { socket, store, tokens, dice, board, effects, scene3, director };
+window.__richman = { socket, store, tokens, dice, board, effects, scene3, director, setTileOwner, setTileHouses };
 window.__richmanEvents = [];
 on('game:events', ({ events }) => window.__richmanEvents.push(...events.map(e => e.type)));

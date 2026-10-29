@@ -1,11 +1,17 @@
 # 大富翁 3D · Richman 3D 🎲
 
-> 星夜都会 · 谁是最后的大亨？
-> 网页版大富翁：Three.js 3D 棋盘 + Socket.IO 多人联机 + 文字聊天 + WebRTC 实时语音
+> 阳光街区 · 谁是最后的大亨？
+> 网页版大富翁：Three.js 3D 街区世界 + Socket.IO 多人联机 + 文字聊天 + WebRTC 实时语音
 
-| 大厅 | 对局 | 地契卡 |
-|---|---|---|
-| ![大厅](docs/screenshot-lobby.jpg) | ![对局](docs/screenshot-game.jpg) | ![地契](docs/screenshot-deed.jpg) |
+| 大厅 | 局部跟随视角 | 街边建筑成长 | 地契卡 |
+|---|---|---|---|
+| ![大厅](docs/screenshot-lobby.png) | ![行走](docs/screenshot-game.png) | ![街区](docs/screenshot-walk.png) | ![地契](docs/screenshot-deed.png) |
+
+参考《大富翁4》的呈现方式设计：**不是一圈方形跑道俯瞰全场**，
+而是一张大地图上的蜿蜒闭合街区（内院水池、车站、公园、警亭），
+对局中镜头**局部跟随当前角色**卷动；买地后地上盖起**真正的房子**，
+随投资逐层长高（小屋 → 2~5 层楼房 → 带招牌的酒店塔楼）；
+Q 版小人沿街行走，手脚摆动，骰子掷在角色身旁的街面上。
 
 ## ✨ 功能
 

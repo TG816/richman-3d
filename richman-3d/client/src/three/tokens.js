@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { tileWorldPos } from './board.js';
+import { tileWorldPos, cellDirs } from './board.js';
 import { sfx } from '../audio/sfx.js';
 
 /**
- * 玩家棋子：程序化建模的 Q 版小机器人（身体胶囊 + 圆头 + 发光面罩 + 天线）。
- * 动画：待机浮动 / 逐格跳跃 / 大跳（入狱）/ 庆祝 / 倒下（破产）。
+ * 玩家角色 v2 —— 参考《大富翁4》：Q 版小人走在街上，有头有脚，
+ * 走路时手脚摆动、身体轻晃；买楼盖楼在街边肉眼可见地长高。
  */
 
-const HOP_TIME = 0.24; // 每格跳跃时长（秒）
+const STEP_TIME = 0.34; // 每格步行时长（秒）
 
 export class Tokens {
   constructor(scene) {
@@ -19,27 +19,37 @@ export class Tokens {
 
   addPlayer(p) {
     if (this.map.has(p.id)) return this.map.get(p.id);
-    const group = buildRobot(p.color);
+    const group = buildChibi(p.color);
     const plate = makeNameplate(p.name, p.color);
-    plate.position.y = 1.42;
+    plate.position.y = 1.5;
     group.add(plate);
     this.scene.add(group);
     const rec = {
       id: p.id, name: p.name, color: p.color,
       group, plate, tile: 0,
-      baseY: 0.42,
-      hop: null,          // {from, to, t, dur, height}
-      bigJump: null,
+      baseY: 0,
+      walk: null,          // {segs, seg, t, dur}
+      jump: null,
       celebrateT: -1,
       fallen: false,
       phase: Math.random() * Math.PI * 2,
-      slotOffset: new THREE.Vector2(0, 0),
+      slotOffset: new THREE.Vector2(0, 0), // 沿切线方向的错位
     };
-    const pos = tileWorldPos(0, rec.baseY);
-    group.position.copy(pos);
+    group.position.copy(this.tilePoint(0, rec));
     this.map.set(p.id, rec);
     this.layoutTile(0);
     return rec;
+  }
+
+  /** 格上的站位：路中心 + 沿切线错位 */
+  tilePoint(tile, rec) {
+    const base = tileWorldPos(tile, 0);
+    const { t } = cellDirs(tile);
+    return new THREE.Vector3(
+      base.x + t.x * rec.slotOffset.x,
+      base.y,
+      base.z + t.z * rec.slotOffset.x
+    );
   }
 
   removePlayer(id) {
@@ -67,12 +77,13 @@ export class Tokens {
 
   /* ---------- 移动 ---------- */
 
-  /** 逐格跳跃路径（事件驱动） */
-  async walk(id, path, colorPulse = true) {
+  /** 沿路径逐格步行（事件驱动） */
+  async walk(id, path) {
     const rec = this.map.get(id);
     if (!rec) return;
-    for (const tile of path) {
-      await this.hopTo(rec, tile);
+    for (let k = 0; k < path.length; k++) {
+      const tile = path[k];
+      await this.stepTo(rec, tile);
       sfx.hop();
       if (tile === 0 && path.length > 1) sfx.coin();
     }
@@ -80,11 +91,11 @@ export class Tokens {
     this.layoutTile(rec.tile);
   }
 
-  hopTo(rec, tile) {
+  stepTo(rec, tile) {
     return new Promise((resolve) => {
       const from = rec.group.position.clone();
-      const to = tileWorldPos(tile, rec.baseY);
-      rec.hop = { from, to, t: 0, dur: HOP_TIME, height: 0.55, done: resolve };
+      const to = this.tilePoint(tile, rec);
+      rec.walk = { from, to, t: 0, dur: STEP_TIME, done: resolve, dir: to.clone().sub(from) };
     });
   }
 
@@ -93,7 +104,7 @@ export class Tokens {
     const rec = this.map.get(id);
     if (!rec) return;
     await new Promise((resolve) => {
-      rec.bigJump = { from: rec.group.position.clone(), to: tileWorldPos(tile, rec.baseY), t: 0, dur: 0.9, height, done: resolve };
+      rec.jump = { from: rec.group.position.clone(), to: this.tilePoint(tile, rec), t: 0, dur: 0.9, height, done: resolve };
       sfx.whoosh();
     });
     rec.tile = tile;
@@ -104,9 +115,9 @@ export class Tokens {
     const rec = this.map.get(id);
     if (!rec) return;
     rec.tile = tile;
-    rec.hop = null;
-    rec.bigJump = null;
-    rec.group.position.copy(tileWorldPos(tile, rec.baseY));
+    rec.walk = null;
+    rec.jump = null;
+    rec.group.position.copy(this.tilePoint(tile, rec));
     this.layoutTile(tile);
   }
 
@@ -122,18 +133,15 @@ export class Tokens {
     rec.plate.userData.update(rec.name, 0, true);
   }
 
-  /** 同格多玩家错位摆放 */
+  /** 同格多玩家沿街道错开 */
   layoutTile(tile) {
     const recs = [...this.map.values()].filter((r) => r.tile === tile && !r.fallen);
     const n = recs.length;
+    const { t } = cellDirs(tile);
     recs.forEach((r, i) => {
-      if (n === 1) r.slotOffset.set(0, 0);
-      else if (n === 2) r.slotOffset.set(i === 0 ? -0.42 : 0.42, 0);
-      else if (n === 3) r.slotOffset.set([0, -0.48, 0.48][i], i === 0 ? -0.3 : 0.3);
-      else {
-        const ang = (i / n) * Math.PI * 2 + Math.PI / 4;
-        r.slotOffset.set(Math.cos(ang) * 0.52, Math.sin(ang) * 0.52);
-      }
+      const off = n <= 1 ? 0 : (i - (n - 1) / 2) * 0.62; // 沿切线排开
+      r.slotOffset.set(off, 0);
+      void t;
     });
   }
 
@@ -142,124 +150,190 @@ export class Tokens {
   update(dt, t) {
     for (const rec of this.map.values()) {
       const g = rec.group;
-      if (rec.hop) {
-        const h = rec.hop;
-        h.t += dt;
-        const u = Math.min(h.t / h.dur, 1);
-        g.position.lerpVectors(h.from, h.to, u);
-        g.position.y = h.from.y + (h.to.y - h.from.y) * u + Math.sin(u * Math.PI) * h.height;
-        const squash = 1 + Math.sin(u * Math.PI) * 0.12;
-        g.scale.set(1 / Math.sqrt(squash), squash, 1 / Math.sqrt(squash));
-        const dir = h.to.clone().sub(h.from);
-        if (dir.lengthSq() > 0.001) {
-          g.rotation.y = Math.atan2(dir.x, dir.z);
+
+      if (rec.walk) {
+        const w = rec.walk;
+        w.t += dt;
+        const u = Math.min(w.t / w.dur, 1);
+        g.position.lerpVectors(w.from, w.to, u);
+        g.position.y = 0;
+        // 步伐
+        rec.stepPhase = (rec.stepPhase || 0) + dt * 13;
+        const s = Math.sin(rec.stepPhase);
+        g.userData.legL.rotation.x = s * 0.7;
+        g.userData.legR.rotation.x = -s * 0.7;
+        g.userData.armL.rotation.x = -s * 0.5;
+        g.userData.armR.rotation.x = s * 0.5;
+        g.userData.body.position.y = 0.62 + Math.abs(Math.cos(rec.stepPhase)) * 0.045;
+        g.userData.head.rotation.z = s * 0.04;
+        if (w.dir.lengthSq() > 0.0001) {
+          const target = Math.atan2(w.dir.x, w.dir.z);
+          g.rotation.y = dampAngle(g.rotation.y, target, 12, dt);
         }
         if (u >= 1) {
-          g.position.copy(h.to);
-          g.scale.set(1, 1, 1);
-          rec.hop = null;
-          h.done?.();
+          g.position.copy(w.to);
+          g.position.y = 0;
+          rec.walk = null;
+          resetPose(g);
+          w.done?.();
         }
-      } else if (rec.bigJump) {
-        const j = rec.bigJump;
+      } else if (rec.jump) {
+        const j = rec.jump;
         j.t += dt;
         const u = Math.min(j.t / j.dur, 1);
         g.position.lerpVectors(j.from, j.to, u);
-        g.position.y = j.from.y + (j.to.y - j.from.y) * u + Math.sin(u * Math.PI) * j.height;
+        g.position.y = Math.sin(u * Math.PI) * j.height;
         g.rotation.y += dt * 7;
+        g.userData.legL.rotation.x = -0.5;
+        g.userData.legR.rotation.x = -0.5;
+        g.userData.armL.rotation.x = -2.4;
+        g.userData.armR.rotation.x = -2.4;
         if (u >= 1) {
           g.position.copy(j.to);
+          g.position.y = 0;
           g.rotation.y = 0;
-          rec.bigJump = null;
+          rec.jump = null;
+          resetPose(g);
           j.done?.();
         }
       } else if (rec.fallen) {
         g.rotation.z = THREE.MathUtils.lerp(g.rotation.z, Math.PI / 2, 1 - Math.pow(0.001, dt));
-        g.position.y = THREE.MathUtils.lerp(g.position.y, 0.16, 1 - Math.pow(0.001, dt));
+        g.position.y = THREE.MathUtils.lerp(g.position.y, 0.15, 1 - Math.pow(0.001, dt));
       } else {
-        // 待机浮动
-        const targetX = tileWorldPos(rec.tile, 0).x + rec.slotOffset.x;
-        const targetZ = tileWorldPos(rec.tile, 0).z + rec.slotOffset.y;
+        // 待机：轻微呼吸 + 张望
+        const targetX = this.tilePoint(rec.tile, rec).x;
+        const targetZ = this.tilePoint(rec.tile, rec).z;
         g.position.x = THREE.MathUtils.lerp(g.position.x, targetX, 1 - Math.pow(0.002, dt));
         g.position.z = THREE.MathUtils.lerp(g.position.z, targetZ, 1 - Math.pow(0.002, dt));
+        g.position.y = 0;
         if (rec.celebrateT >= 0) {
           rec.celebrateT += dt;
           const u = rec.celebrateT % 0.9;
-          g.position.y = rec.baseY + Math.abs(Math.sin(u / 0.9 * Math.PI * 2)) * 0.5;
+          g.position.y = Math.abs(Math.sin((u / 0.9) * Math.PI * 2)) * 0.45;
           g.rotation.y += dt * 9;
-          if (rec.celebrateT > 2.2) { rec.celebrateT = -1; g.rotation.y = 0; }
+          g.userData.armL.rotation.x = -2.6;
+          g.userData.armR.rotation.x = -2.6;
+          if (rec.celebrateT > 2.2) {
+            rec.celebrateT = -1;
+            g.rotation.y = 0;
+            resetPose(g);
+          }
         } else {
-          g.position.y = rec.baseY + Math.abs(Math.sin(t * 2.1 + rec.phase)) * 0.045;
-          g.rotation.y = Math.sin(t * 0.8 + rec.phase) * 0.12;
-          // 面罩呼吸
-          const visor = g.userData.visor;
-          if (visor) visor.material.emissiveIntensity = 1.6 + Math.sin(t * 3 + rec.phase) * 0.5;
+          g.userData.body.position.y = 0.62 + Math.sin(t * 2.1 + rec.phase) * 0.018;
+          g.userData.armL.rotation.x = Math.sin(t * 1.6 + rec.phase) * 0.08;
+          g.userData.armR.rotation.x = -Math.sin(t * 1.6 + rec.phase) * 0.08;
+          g.userData.head.rotation.y = Math.sin(t * 0.6 + rec.phase) * 0.35;
+          g.rotation.z = THREE.MathUtils.lerp(g.rotation.z, 0, 1 - Math.pow(0.002, dt));
         }
-        g.scale.set(1, 1, 1);
       }
     }
   }
 }
 
-/* ============ 机器人构建 ============ */
+function resetPose(g) {
+  g.userData.legL.rotation.set(0, 0, 0);
+  g.userData.legR.rotation.set(0, 0, 0);
+  g.userData.armL.rotation.set(0, 0, 0);
+  g.userData.armR.rotation.set(0, 0, 0);
+  g.userData.head.rotation.set(0, 0, 0);
+}
 
-function buildRobot(colorHex) {
+function dampAngle(cur, target, lambda, dt) {
+  let d = target - cur;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return cur + d * (1 - Math.pow(0.5, dt * lambda));
+}
+
+/* ============ Q 版小人 ============ */
+
+function buildChibi(colorHex) {
   const color = new THREE.Color(colorHex);
-  const body = new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.55 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.6, metalness: 0.4 });
-  const group = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0xffd9b8, roughness: 0.65 });
+  const outfit = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const outfitDark = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.72), roughness: 0.6 });
+  const shoe = new THREE.MeshStandardMaterial({ color: 0x3a3f52, roughness: 0.7 });
+  const hair = new THREE.MeshStandardMaterial({ color: color.clone().lerp(new THREE.Color(0x2a2118), 0.55), roughness: 0.75 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x22242e, roughness: 0.4 });
 
-  const legGeo = new THREE.CapsuleGeometry(0.075, 0.1, 4, 10);
-  for (const x of [-0.1, 0.1]) {
-    const leg = new THREE.Mesh(legGeo, dark);
-    leg.position.set(x, 0.1, 0);
-    leg.castShadow = true;
-    group.add(leg);
-  }
+  const g = new THREE.Group();
 
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.16, 6, 16), body);
-  torso.position.y = 0.38;
-  torso.castShadow = true;
-  group.add(torso);
+  // 腿（髋部为轴）
+  const legGeo = new THREE.BoxGeometry(0.11, 0.32, 0.11);
+  legGeo.translate(0, -0.16, 0);
+  const legL = new THREE.Group();
+  legL.position.set(0.09, 0.32, 0);
+  const legLMesh = new THREE.Mesh(legGeo, outfitDark);
+  legLMesh.castShadow = true;
+  legL.add(legLMesh);
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.07, 0.2), shoe);
+  shoeL.position.set(0, -0.31, 0.03);
+  legL.add(shoeL);
+  g.add(legL);
 
-  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.028, 8, 20), dark);
+  const legR = new THREE.Group();
+  legR.position.set(-0.09, 0.32, 0);
+  const legRMesh = new THREE.Mesh(legGeo, outfitDark);
+  legRMesh.castShadow = true;
+  legR.add(legRMesh);
+  const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.07, 0.2), shoe);
+  shoeR.position.set(0, -0.31, 0.03);
+  legR.add(shoeR);
+  g.add(legR);
+
+  // 身体
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.2, 5, 14), outfit);
+  body.position.y = 0.62;
+  body.castShadow = true;
+  g.add(body);
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.035, 8, 18), outfitDark);
   belt.rotation.x = Math.PI / 2;
-  belt.position.y = 0.3;
-  group.add(belt);
+  belt.position.y = 0.47;
+  g.add(belt);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 20, 16), body);
-  head.position.y = 0.68;
-  head.castShadow = true;
-  group.add(head);
+  // 手臂（肩部为轴）
+  const armGeo = new THREE.CapsuleGeometry(0.052, 0.2, 4, 8);
+  armGeo.translate(0, -0.13, 0);
+  const armL = new THREE.Group();
+  armL.position.set(0.24, 0.74, 0);
+  const armLMesh = new THREE.Mesh(armGeo, outfit);
+  armLMesh.castShadow = true;
+  armL.add(armLMesh);
+  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 7), skin);
+  handL.position.y = -0.27;
+  armL.add(handL);
+  g.add(armL);
 
-  const visor = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2, 0.075, 0.06),
-    new THREE.MeshStandardMaterial({ color: 0x0a0f1e, emissive: 0x8fe3ff, emissiveIntensity: 1.8, roughness: 0.2 })
-  );
-  visor.position.set(0, 0.7, 0.135);
-  group.add(visor);
-  group.userData.visor = visor;
+  const armR = new THREE.Group();
+  armR.position.set(-0.24, 0.74, 0);
+  const armRMesh = new THREE.Mesh(armGeo, outfit);
+  armRMesh.castShadow = true;
+  armR.add(armRMesh);
+  const handR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 7), skin);
+  handR.position.y = -0.27;
+  armR.add(handR);
+  g.add(armR);
 
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 8), dark);
-  antenna.position.y = 0.88;
-  group.add(antenna);
-  const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(0.038, 12, 10),
-    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.2 })
-  );
-  ball.position.y = 0.95;
-  group.add(ball);
-
-  const armGeo = new THREE.CapsuleGeometry(0.05, 0.11, 4, 8);
-  for (const s of [-1, 1]) {
-    const arm = new THREE.Mesh(armGeo, body);
-    arm.position.set(s * 0.26, 0.4, 0);
-    arm.rotation.z = s * 0.5;
-    arm.castShadow = true;
-    group.add(arm);
+  // 头（大圆头 + 头发 + 眼睛）
+  const head = new THREE.Group();
+  head.position.y = 1.04;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.21, 20, 16), skin);
+  skull.castShadow = true;
+  head.add(skull);
+  const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(0.225, 20, 14), hair);
+  hairMesh.scale.set(1, 0.78, 1);
+  hairMesh.position.y = 0.07;
+  head.add(hairMesh);
+  for (const x of [0.075, -0.075]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), eyeMat);
+    eye.position.set(x, 0.0, 0.185);
+    head.add(eye);
   }
+  g.add(head);
 
-  return group;
+  g.userData = { legL, legR, armL, armR, body, head };
+  g.scale.setScalar(1.12);
+  return g;
 }
 
 function makeNameplate(name, colorHex) {
@@ -270,25 +344,25 @@ function makeNameplate(name, colorHex) {
   const draw = (name, money, dead) => {
     const g = cv.getContext('2d');
     g.clearRect(0, 0, 256, 96);
-    g.fillStyle = 'rgba(8,12,28,.88)';
+    g.fillStyle = 'rgba(255,255,255,.92)';
     roundRect(g, 8, 8, 240, 80, 22);
     g.fill();
-    g.strokeStyle = dead ? '#666' : colorHex;
+    g.strokeStyle = dead ? '#999' : colorHex;
     g.lineWidth = 4;
     roundRect(g, 8, 8, 240, 80, 22);
     g.stroke();
     g.textAlign = 'center';
-    g.fillStyle = '#eef1fb';
+    g.fillStyle = '#2c3042';
     g.font = 'bold 34px "Microsoft YaHei"';
     g.fillText(name.slice(0, 6), 128, 44);
     g.font = 'bold 30px "Microsoft YaHei"';
-    g.fillStyle = dead ? '#8a8fa8' : '#f0c96a';
+    g.fillStyle = dead ? '#8a8fa8' : '#b8862a';
     g.fillText(dead ? '💀 出局' : `¥ ${(money ?? 0).toLocaleString('en-US')}`, 128, 78);
     tex.needsUpdate = true;
   };
   draw(name, 0, false);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  sprite.scale.set(1.65, 0.62, 1);
+  sprite.scale.set(1.6, 0.6, 1);
   sprite.userData.update = draw;
   return sprite;
 }

@@ -20,6 +20,7 @@ export class Dice {
   constructor(scene) {
     this.group = new THREE.Group();
     this.group.position.set(0, 0.5, 0);
+    this.group.scale.setScalar(0.55); // 骰子相对 Q 版角色不宜过大
     this.group.visible = false;
     scene.add(this.group);
     this.dice = [makeDie(), makeDie()];
