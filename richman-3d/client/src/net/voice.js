@@ -1,5 +1,7 @@
-import { socket, on } from '../net/socket.js';
-import { store, toast } from '../game/store.js';
+import { socket } from '../net/socket.js';
+// 注意：on 必须来自 store 事件总线——进房通知 emit('room') 走的是 bus，不是 Socket.IO；
+// 之前误从 socket.js 导入 on，导致 socket.on('room') 永远收不到、voice:hello 不发、P2P 连接从未建立
+import { store, toast, on } from '../game/store.js';
 
 /**
  * 实时语音（WebRTC P2P mesh，信令走 Socket.IO）。
