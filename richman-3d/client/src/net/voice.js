@@ -86,6 +86,8 @@ class Voice {
         } else if (data.candidate) {
           if (pc?.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
           else this._pending.set(from, [...(this._pending.get(from) || []), data.candidate]);
+        } else if (data.restart) {
+          this.restartIce(from); // 对端请求本方（offer 方）执行 ICE restart
         }
       } catch (err) {
         console.warn('[voice] signal error', err);
@@ -141,8 +143,16 @@ class Voice {
       audio.srcObject = e.streams[0];
       audio.play?.().catch(() => {});
     };
+    pc._initiator = initiator; // 记录 offer 方：ICE restart 只由该端发起，避免双 offer 冲突
+    pc.oniceconnectionstatechange = () => {
+      // 网络抖动导致 ICE failed：先尝试 ICE restart 恢复，而不是直接丢弃连接（否则会永久失声）
+      if (pc.iceConnectionState !== 'failed') return;
+      if (pc._initiator) this.restartIce(sid);
+      else socket.emit('voice:signal', { to: sid, data: { restart: true } }); // 非 offer 方请对方代为 restart
+    };
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) this.dropPeer(sid);
+      // 只有真正 closed（对端离开/主动关闭）才清理；failed 交给上面的 restart 处理
+      if (pc.connectionState === 'closed') this.dropPeer(sid);
     };
     if (initiator) {
       pc.onnegotiationneeded = async () => {
@@ -163,6 +173,23 @@ class Voice {
     const rec = this.analysers.get(sid);
     if (rec) { rec.ctx.close().catch(() => {}); this.analysers.delete(sid); }
     this.setSpeaking(sid, false);
+  }
+
+  /** ICE 失败后重新协商恢复（仅 offer 方调用，复用现有 offer/answer 信令） */
+  async restartIce(sid) {
+    const pc = this.peers.get(sid);
+    if (!pc || pc._restarting) return;
+    pc._restarting = true;
+    try {
+      // iceRestart 生成新的 ufrag/pwd，强制重新收集候选并检查连通性；对端走常规 offer 分支回 answer
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      socket.emit('voice:signal', { to: sid, data: { sdp: pc.localDescription } });
+    } catch (err) {
+      console.warn('[voice] ICE restart failed', err);
+    } finally {
+      pc._restarting = false;
+    }
   }
 
   /** 开/关麦克风。首次开麦请求权限，之后只切换轨道 enabled */
