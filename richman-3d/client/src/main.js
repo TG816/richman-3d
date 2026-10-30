@@ -55,11 +55,12 @@ document.getElementById('btnSound').onclick = (e) => {
   e.currentTarget.classList.toggle('off', !store.soundOn);
 };
 document.getElementById('btnMic').onclick = async (e) => {
+  const btn = e.currentTarget; // 必须在 await 前保存：await 期间事件派发结束，currentTarget 会被重置为 null
   sfx.unlock();
   const onNow = await voice.toggleMic();
-  e.currentTarget.textContent = onNow ? '🎙️' : '🔇';
-  e.currentTarget.classList.toggle('on', onNow);
-  e.currentTarget.classList.toggle('off', !onNow);
+  btn.textContent = onNow ? '🎙️' : '🔇';
+  btn.classList.toggle('on', onNow);
+  btn.classList.toggle('off', !onNow);
 };
 
 /* 换房间时清空旧房间残留（动画队列、弹窗、高亮） */

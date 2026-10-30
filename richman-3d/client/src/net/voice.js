@@ -78,6 +78,17 @@ class Voice {
     });
 
     socket.on('disconnect', () => this.teardown());
+
+    // 兜底：ontrack 可能早于用户手势触发，play() 被自动播放策略拒绝后，在后续点击/按键时重试播放
+    addEventListener('pointerdown', () => this.resumeAll(), { once: false });
+    addEventListener('keydown', () => this.resumeAll(), { once: false });
+  }
+
+  /** 重新播放所有被自动播放策略挂起的对端音频 */
+  resumeAll() {
+    for (const audio of this.audios.values()) {
+      if (audio.paused) audio.play().catch(() => {});
+    }
   }
 
   async flushCandidates(sid) {
