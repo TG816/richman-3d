@@ -10,13 +10,15 @@ class Sfx {
     this._unlocked = false;
   }
 
-  unlock() {
+  async unlock() {
     if (this._unlocked) return;
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.5;
       this.master.connect(this.ctx.destination);
+      // 浏览器自动播放策略：即便在用户手势里创建，AudioContext 仍可能是 suspended，必须显式 resume，否则所有音效静音
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
       this._unlocked = true;
     } catch { /* 无音频设备时静默降级 */ }
   }
@@ -26,7 +28,11 @@ class Sfx {
     if (this.master) this.master.gain.value = on ? 0.5 : 0;
   }
 
-  get t() { return this.ctx.currentTime; }
+  get t() {
+    // 兜底：播放前若发现 context 又被挂起（如切后台回来），自动恢复
+    if (this.ctx?.state === 'suspended') this.ctx.resume().catch(() => {});
+    return this.ctx.currentTime;
+  }
 
   tone({ freq = 440, dur = 0.15, type = 'sine', gain = 0.2, when = 0, slide = 0, attack = 0.005 }) {
     if (!this._unlocked || !this.enabled) return;

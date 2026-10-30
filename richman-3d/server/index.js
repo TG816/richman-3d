@@ -29,6 +29,10 @@ app.get('/api/config', (_req, res) => {
     avatars: AVATARS,
   });
 });
+app.get('/api/saves', (_req, res) => {
+  res.json({ saves: rooms.listSaves() });
+});
+
 app.get('/api/rooms', (_req, res) => {
   res.json({
     rooms: [...rooms.rooms.values()]
@@ -153,7 +157,58 @@ io.on('connection', (socket) => {
       if (res.room.started && res.room.engine) {
         socket.emit('game:state', { __room: res.room.code, state: res.room.engine.snapshot() });
         socket.emit('game:timer', { __room: res.room.code, deadline: res.room.turnDeadline, seconds: config.TURN_SECONDS });
+        if (res.room.vote) socket.emit('game:vote', { __room: res.room.code, vote: res.room.vote });
       }
+    } catch (e) {
+      ack?.({ ok: false, error: e.message });
+    }
+  });
+
+  /* ---------- 结束对局投票 ---------- */
+  socket.on('game:vote', ({ action, mode, agree } = {}, ack) => {
+    const room = rooms.rooms.get(roomCode);
+    if (!room || !room.started) return ack?.({ ok: false, error: 'not in game' });
+    try {
+      switch (action) {
+        case 'request': {
+          const r = rooms.requestVote(room, socket.id, mode);
+          ack?.(r.error ? { ok: false, error: r.error } : { ok: true });
+          break;
+        }
+        case 'vote': {
+          const r = rooms.castVote(room, socket.id, !!agree);
+          ack?.(r?.error ? { ok: false, error: r.error } : { ok: true });
+          break;
+        }
+        case 'cancel':
+          rooms.cancelVote(room, socket.id);
+          ack?.({ ok: true });
+          break;
+        default:
+          ack?.({ ok: false, error: 'unknown action' });
+      }
+    } catch (e) {
+      ack?.({ ok: false, error: e.message });
+    }
+  });
+
+  /* ---------- 读档恢复 ---------- */
+  socket.on('room:resume', ({ code, playerId } = {}, ack) => {
+    try {
+      const c = String(code || '').toUpperCase();
+      const res = rooms.resumeRoom(c);
+      if (res.error) return ack?.({ ok: false, error: res.error });
+      const j = rooms.resumeJoin(c, { playerId, sid: socket.id });
+      if (j.error) return ack?.({ ok: false, error: j.error });
+      switchRoom(c);
+      socket.join(c);
+      // 先回 ack（客户端据其设置房间），再补发对局状态，避免竞态丢包
+      ack?.({ ok: true, code: c, me: j.me, room: rooms.roomState(j.room), chat: j.room.chat });
+      socket.emit('game:state', { __room: c, state: j.room.engine.snapshot() });
+      if (j.room.turnDeadline) {
+        socket.emit('game:timer', { __room: c, deadline: j.room.turnDeadline, seconds: config.TURN_SECONDS });
+      }
+      console.log(`[save] ${c} resumed by ${j.me.name}`);
     } catch (e) {
       ack?.({ ok: false, error: e.message });
     }

@@ -47,6 +47,30 @@ export class GameEngine {
 
   /* ================= 对外接口 ================= */
 
+  /** 从存档快照恢复引擎（用于"保存并退出"后的继续对局）。
+   * 牌库顺序本就不外泄，恢复时按剩余张数重新洗牌，不影响公平性。 */
+  static fromSnapshot(snap) {
+    const eng = Object.create(GameEngine.prototype);
+    eng.players = snap.players.map((p) => ({ ...p }));
+    eng.turn = snap.turn;
+    eng.round = snap.round;
+    eng.phase = snap.phase;
+    eng.pending = snap.pending;
+    eng.lastRoll = snap.lastRoll;
+    eng.props = Object.fromEntries(Object.entries(snap.props || {}).map(([k, v]) => [k, { ...v }]));
+    eng.decks = { chance: shuffle([...CHANCE]), fate: shuffle([...FATE]) };
+    eng.discard = { chance: [], fate: [] };
+    eng.decks.chance.splice(0, Math.max(0, eng.decks.chance.length - (snap.decksLeft?.chance ?? 12)));
+    eng.decks.fate.splice(0, Math.max(0, eng.decks.fate.length - (snap.decksLeft?.fate ?? 12)));
+    eng.dice = snap.lastRoll?.dice ?? [1, 1];
+    eng.winner = snap.winner ? eng.players.find((p) => p.id === snap.winner) || null : null;
+    eng.lastRanking = snap.ranking ?? null;
+    eng.events = [];
+    eng.log = [...(snap.log || [])];
+    eng.bankFlow = 0;
+    return eng;
+  }
+
   can(playerId, action) {
     if (this.phase === 'gameover') return false;
     const p = this.players[this.turn];
@@ -111,14 +135,9 @@ export class GameEngine {
     const info = this.props[tile];
     const t = BOARD[tile];
     if (!info || info.owner !== playerId || t.type !== 'prop') return;
-    const group = GROUP_TILES[t.group];
-    if (!group.every((i) => this.props[i]?.owner === playerId))
-      return this.toast('需集齐同色地段才能建房');
-    if (group.some((i) => this.props[i].mortgaged))
-      return this.toast('该地段存在抵押地块，不能建房');
+    // 新规则：只要自己买过这块地就能建房，不再要求集齐同色组或均匀建房
+    if (info.mortgaged) return this.toast('地块已抵押，不能建房');
     if (info.houses >= 5) return this.toast('这里已是酒店');
-    const max = Math.max(...group.map((i) => this.props[i].houses));
-    if (info.houses < max) return this.toast('需均匀建房：请先补齐同组其他地块');
     const cost = GROUPS[t.group].houseCost;
     const p = this.players.find((x) => x.id === playerId);
     if (p.money < cost) return this.toast('资金不足');
@@ -133,9 +152,7 @@ export class GameEngine {
     const t = BOARD[tile];
     if (!info || info.owner !== playerId || info.houses <= 0 || t.type !== 'prop') return;
     const p = this.players.find((x) => x.id === playerId);
-    const group = GROUP_TILES[t.group];
-    const min = Math.min(...group.map((i) => this.props[i]?.houses ?? 0));
-    if (info.houses - 1 < min) return this.toast('需均匀拆房：请先拆同组最高的');
+    // 新规则：单块地独立经营，拆房不再受同组限制
     const refund = GROUPS[t.group].houseCost / 2;
     this.transfer(null, playerId, refund, `拆除「${t.name}」房屋`);
     info.houses--;
@@ -148,11 +165,9 @@ export class GameEngine {
     const t = BOARD[tile];
     if (!info || info.owner !== playerId || info.mortgaged) return;
     const p = this.players.find((x) => x.id === playerId);
-    if (t.type === 'prop') {
-      const group = GROUP_TILES[t.group];
-      if (group.some((i) => (this.props[i]?.houses ?? 0) > 0))
-        return this.toast('同组还有房屋，需先拆除');
-    }
+    // 只检查当前地块自身是否有房；同组其他地块可能属于别人，不应影响自己抵押
+    if (t.type === 'prop' && info.houses > 0)
+      return this.toast('该地块还有房屋，需先拆除');
     info.mortgaged = true;
     const gain = t.price / 2;
     this.transfer(null, playerId, gain, `抵押「${t.name}」`);
@@ -462,16 +477,19 @@ export class GameEngine {
   /** 付款 from→to（null=银行）。资金不足自动拆房→抵押，仍不足则破产清算 */
   transfer(fromId, toId, amount, reason) {
     if (amount <= 0) return;
-    if (!fromId) this.bankFlow -= amount;   // 银行支出
-    if (!toId) this.bankFlow += amount;     // 银行收入
     const from = fromId ? this.players.find((p) => p.id === fromId) : null;
     const to = toId ? this.players.find((p) => p.id === toId) : null;
     if (from) {
       if (from.money < amount) this.liquidate(from, amount);
+      // 仍不足 → 破产，本次交易未完成：bankFlow 不在此记，破产清算内部对真实资金流自行记账
       if (from.money < amount) return this.bankruptPlayer(from, to);
       from.money -= amount;
+      if (!toId) this.bankFlow += amount; // 钱确实收入银行
     }
-    if (to) to.money += amount;
+    if (to) {
+      to.money += amount;
+      if (!fromId) this.bankFlow -= amount; // 钱确实由银行支出
+    }
     this.emit({ type: 'money', from: fromId, to: toId, amount, reason });
   }
 
@@ -518,6 +536,8 @@ export class GameEngine {
       this.addLog(`💀 ${p.name} 破产出局！全部地产与现金移交给 ${creditor.name}`);
       this.emit({ type: 'bankrupt', player: p.id, creditor: creditor.id });
     } else {
+      // 无债权人：剩余现金作废，视为银行回收，否则钱凭空消失会破坏守恒
+      this.bankFlow += p.money;
       p.money = 0;
       this.addLog(`💀 ${p.name} 破产出局！`);
       this.emit({ type: 'bankrupt', player: p.id, creditor: null });

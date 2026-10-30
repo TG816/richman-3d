@@ -40,11 +40,13 @@ try {
   window.__initError = (err?.stack || String(err));
 }
 
-/* 音频解锁（浏览器手势策略） */
+/* 音频解锁（浏览器手势策略）：点击或按键都能触发，避免首次交互没唤醒 AudioContext */
 let unlocked = false;
-addEventListener('pointerdown', () => {
+function unlockAudio() {
   if (!unlocked) { sfx.unlock(); unlocked = true; }
-}, { once: false });
+}
+addEventListener('pointerdown', unlockAudio, { once: false });
+addEventListener('keydown', unlockAudio, { once: false });
 
 document.getElementById('btnSound').onclick = (e) => {
   store.soundOn = !store.soundOn;
@@ -70,6 +72,7 @@ onBus('room-switch', () => {
   moveHighlight(board, -1);
   document.getElementById('overModal').classList.add('hidden');
   document.getElementById('deedModal').classList.add('hidden');
+  document.getElementById('exitModal').classList.add('hidden');
 });
 
 /* 回到大厅：镜头拉远展示全城 */
@@ -92,6 +95,7 @@ on('room:state', (room) => {
   store.room = room;
   emit('room', room);
   if (room.started && !wasStarted) enterGame();
+  else if (store.screen === 'game') renderAll();
 });
 
 function handleGameState(payload) {
@@ -118,6 +122,18 @@ on('game:timer', (t) => {
   emit('timer', t);
 });
 on('chat:msg', (msg) => emit('chat', msg));
+on('room:closed', ({ __room, reason, code } = {}) => {
+  if (__room !== store.room?.code) return;
+  socket.emit('room:leave');
+  voice.teardown();
+  backToLobby();
+  if (reason === 'saved' && code) {
+    document.getElementById('codeInput').value = code;
+    toast(`对局已保存，存档码：${code}`);
+  } else {
+    toast('对局已结束，已返回大厅');
+  }
+});
 
 socket.on('connect', async () => {
   // 每次建链（含重连）都向服务器对齐房间状态：找回席位 / 补发漏掉的广播

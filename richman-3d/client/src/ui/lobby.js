@@ -74,6 +74,26 @@ export function initLobby() {
     if (!res.ok) return showErr(res.error);
     enterRoom(res);
   };
+  $('btnResume').onclick = async () => {
+    savePrefs();
+    leaveCurrentRoom();
+    const code = codeInput.value.trim().toUpperCase();
+    if (code.length !== 4) return showErr('请输入 4 位存档码');
+    let savedSeat = null;
+    try {
+      savedSeat = JSON.parse(sessionStorage.getItem('richman.savedSeat') || 'null');
+    } catch (err) {
+      console.warn('[save] invalid saved seat info:', err);
+      sessionStorage.removeItem('richman.savedSeat');
+    }
+    const res = await emitAck('room:resume', {
+      code,
+      playerId: savedSeat?.code === code ? savedSeat.playerId : undefined,
+    });
+    if (!res.ok) return showErr(res.error);
+    if (savedSeat?.code === code) sessionStorage.removeItem('richman.savedSeat');
+    enterRoom(res);
+  };
   codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnJoin').click(); });
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnCreate').click(); });
 
@@ -172,5 +192,7 @@ export function backToLobby() {
   store.me = null;
   store.snap = null;
   store.chat = [];
+  emit('room-switch');
   emit('screen', 'lobby');
+  emit('room', null);
 }

@@ -9,9 +9,12 @@ import { store, toast } from '../game/store.js';
  *  - 由后进房的成员主动发 offer（voice:peers），先进房者被动应答，天然避免双 offer。
  *  - localhost 属安全上下文可直接取麦；部署到服务器必须 HTTPS，NAT 复杂时可加 TURN（预留）。
  */
+// 自建 coturn（阿里云 ECS）：P2P 打洞失败时媒体流走这里中继。
+// 信令仍走 Cloudflare Tunnel，但 WebRTC 的 UDP 媒体流不经 tunnel，直接连 ECS 公网 IP 的 3478。
 const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun.qq.com:3478' },
+  { urls: 'stun:47.86.33.146:3478' },
+  { urls: 'turn:47.86.33.146:3478', username: 'richman', credential: 'Richman2026' },
+  { urls: 'turn:47.86.33.146:3478?transport=tcp', username: 'richman', credential: 'Richman2026' },
 ];
 
 class Voice {

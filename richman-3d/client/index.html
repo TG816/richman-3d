@@ -39,9 +39,10 @@
           <button id="btnCreate" class="btn btn-gold big">🎲 创建房间</button>
         </div>
         <div class="join-row">
-          <input id="codeInput" maxlength="4" placeholder="房间码" class="code-input" autocomplete="off" />
+          <input id="codeInput" maxlength="4" placeholder="房间码 / 存档码" class="code-input" autocomplete="off" />
           <button id="btnJoin" class="btn btn-glass big">加入房间</button>
         </div>
+        <button id="btnResume" class="btn btn-glass big">📂 使用存档码继续对局</button>
         <p id="lobbyError" class="lobby-error"></p>
       </div>
 
@@ -75,6 +76,7 @@
       </div>
       <div id="playerCards" class="player-cards"></div>
       <div class="hud-tools">
+        <button id="btnExit" class="icon-btn" title="结束对局（需全员同意）">🚪</button>
         <button id="btnSound" class="icon-btn" title="音效">🔊</button>
         <button id="btnMic" class="icon-btn" title="语音开关">🎙️</button>
         <button id="btnChat" class="icon-btn" title="聊天">💬</button>
@@ -131,7 +133,29 @@
     </div>
   </div>
 
-  <div id="toasts" class="toasts"></div>
+    <!-- 结束对局投票 -->
+    <div id="exitModal" class="modal hidden">
+      <div class="exit-panel glass">
+        <h3 id="exitTitle">结束对局</h3>
+        <p id="exitDesc" class="exit-desc">结束需要全体玩家投票同意</p>
+        <div id="exitChoices" class="exit-choices">
+          <button id="btnVoteSave" class="btn btn-gold big">💾 发起「保存并结束」</button>
+          <button id="btnVoteQuit" class="btn btn-glass big">🚪 发起「直接结束」</button>
+          <button id="btnVoteBack" class="btn btn-mini ghost">返回对局</button>
+        </div>
+        <div id="exitVoting" class="hidden">
+          <p id="exitVoteInfo" class="exit-desc"></p>
+          <div id="exitVoteBtns" class="exit-choices hidden">
+            <button id="btnVoteAgree" class="btn btn-gold big">👍 同意结束</button>
+            <button id="btnVoteReject" class="btn btn-glass big">👎 拒绝，继续玩</button>
+          </div>
+          <button id="btnVoteCancel" class="btn btn-mini ghost hidden">✕ 发起者取消投票</button>
+          <div class="vote-countdown"><div id="voteCountdownFill"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
 
   <script type="module" src="/src/main.js"></script>
 </body>

@@ -1,5 +1,5 @@
 import { BOARD, GROUPS } from '@board';
-import { socket } from '../net/socket.js';
+import { socket, emitAck } from '../net/socket.js';
 import { store, isMyTurn, currentPlayer, playerById, on, toast } from '../game/store.js';
 import { escapeHtml } from './lobby.js';
 
@@ -14,6 +14,74 @@ export function initHud() {
   $('btnEnd').onclick = () => act('endTurn');
   $('btnPayJail').onclick = () => act('payJail');
   $('btnUseCard').onclick = () => act('useCard');
+  $('btnExit').onclick = () => {
+    $('exitChoices').classList.remove('hidden');
+    $('exitVoting').classList.add('hidden');
+    $('exitModal').classList.remove('hidden');
+  };
+  $('btnVoteBack').onclick = () => $('exitModal').classList.add('hidden');
+  $('btnVoteSave').onclick = () => requestVote('save');
+  $('btnVoteQuit').onclick = () => requestVote('quit');
+  $('btnVoteAgree').onclick = () => castVote(true);
+  $('btnVoteReject').onclick = () => castVote(false);
+  $('btnVoteCancel').onclick = () => sendVoteAction({ action: 'cancel' });
+
+  socket.on('game:vote', ({ __room, vote } = {}) => {
+    if (__room !== store.room?.code || !vote) return;
+    if (vote.done) {
+      $('exitModal').classList.add('hidden');
+      if (vote.passed && vote.mode === 'save' && vote.savedCode) {
+        sessionStorage.setItem('richman.savedSeat', JSON.stringify({
+          code: vote.savedCode,
+          playerId: store.me?.id,
+        }));
+      } else if (vote.saveFailed) {
+        toast('存档失败，对局仍在继续，请稍后重试', true);
+      } else if (vote.gameEnded) {
+        toast('对局已自然结束，结束投票已关闭');
+      } else if (vote.passed) {
+        toast('全员同意，正在结束对局');
+      } else if (vote.cancelled) {
+        toast('发起者已取消结束投票');
+      } else if (vote.expired) {
+        toast('结束投票超时，投票未通过', true);
+      } else {
+        toast('有玩家拒绝结束，对局继续', true);
+      }
+      return;
+    }
+
+    $('exitChoices').classList.add('hidden');
+    $('exitVoting').classList.remove('hidden');
+    $('exitModal').classList.remove('hidden');
+    $('exitTitle').textContent = vote.mode === 'save' ? '保存并结束对局' : '直接结束对局';
+    const yes = Object.values(vote.votes || {}).filter(Boolean).length;
+    $('exitVoteInfo').textContent = `${vote.byName} 发起了${vote.mode === 'save' ? '保存并结束' : '直接结束'}投票（${yes}/${vote.total} 人同意）`;
+    const alreadyVoted = store.me?.id in (vote.votes || {});
+    const isInitiator = store.me?.id === vote.by;
+    $('exitVoteBtns').classList.toggle('hidden', isInitiator || alreadyVoted);
+    $('btnVoteCancel').classList.toggle('hidden', !isInitiator);
+    $('voteCountdownFill').style.transition = 'none';
+    $('voteCountdownFill').style.transform = 'scaleX(1)';
+    requestAnimationFrame(() => {
+      $('voteCountdownFill').style.transition = `transform ${Math.max(0, vote.deadline - Date.now())}ms linear`;
+      $('voteCountdownFill').style.transform = 'scaleX(0)';
+    });
+  });
+
+  async function requestVote(mode) {
+    await sendVoteAction({ action: 'request', mode });
+  }
+
+  async function castVote(agree) {
+    await sendVoteAction({ action: 'vote', agree });
+  }
+
+  async function sendVoteAction(payload) {
+    const res = await emitAck('game:vote', payload);
+    if (!res.ok) toast(res.error || '投票请求失败', true);
+  }
+
   addEventListener('keydown', (e) => {
     if (document.activeElement?.tagName === 'INPUT') return;
     if (e.key === 'Enter' && store.screen === 'game' && !$('btnEnd').classList.contains('hidden')) {
@@ -43,8 +111,8 @@ export function initHud() {
       const name = (id) => escapeHtml(playerById(id)?.name ?? '玩家');
       switch (e.type) {
         case 'turn':
-          if (!store.snap) break;
-          announce(`轮到 <b>${escapeHtml(currentPlayer()?.name ?? '')}</b> 行动`, 'gold');
+          // 必须用事件自带的 e.player：此刻新快照还没到，currentPlayer() 读到的是上一回合玩家（两人局恰好反向）
+          announce(`轮到 <b>${name(e.player)}</b> 行动`, 'gold');
           break;
         case 'salary': announce(`${name(e.player)} 经过起点，领取工资 <b>¥${e.amount}</b>`, 'gold'); break;
         case 'rent': announce(`${name(e.from)} 向 ${name(e.to)} 支付租金 <b>¥${e.amount}</b>`, 'bad'); break;
@@ -126,6 +194,8 @@ function renderActions() {
 
   if (s.phase === 'gameover') {
     status.innerHTML = '对局结束';
+  } else if (store.room?.resumeWaiting) {
+    status.innerHTML = '等待其他玩家从大厅输入存档码加入…';
   } else if (mine) {
     if (s.phase === 'roll') {
       show('btnRoll', true);
@@ -227,8 +297,13 @@ export function openDeed(tileIndex) {
   const canManage = s && owner && owner.id === store.me?.id && isMyTurn() && ['roll', 'end'].includes(s.phase);
   if (canManage && isProp) {
     const cost = GROUPS[t.group].houseCost;
+    // 新规则：买过就能建房，只要未抵押且未到酒店即可点击
+    let buildBtn = '';
+    if (info.houses < 5 && !info.mortgaged) {
+      buildBtn = `<button class="btn btn-gold btn-mini" data-act="build">建房 ¥${cost.toLocaleString()}</button>`;
+    }
     actions = `<div class="deed-actions">
-      ${info.houses < 5 && !info.mortgaged ? `<button class="btn btn-gold btn-mini" data-act="build">建房 ¥${cost.toLocaleString()}</button>` : ''}
+      ${buildBtn}
       ${info.houses > 0 ? `<button class="btn btn-glass btn-mini" data-act="sellHouse">拆房退 ¥${cost / 2}</button>` : ''}
       ${!info.mortgaged ? `<button class="btn btn-glass btn-mini" data-act="mortgage">抵押 +¥${(t.price / 2).toLocaleString()}</button>`
         : `<button class="btn btn-gold btn-mini" data-act="unmortgage">赎回 -¥${Math.ceil(t.price / 2 * 1.1).toLocaleString()}</button>`}

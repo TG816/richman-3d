@@ -328,6 +328,23 @@ body {
   display: grid; place-items: center;
   animation: fade .2s both;
 }
+.exit-panel {
+  width: min(440px, calc(100vw - 32px));
+  padding: 26px;
+  text-align: center;
+}
+.exit-panel h3 { margin-bottom: 10px; color: var(--gold); font-size: 22px; }
+.exit-desc { margin: 0 0 18px; color: var(--muted); line-height: 1.6; }
+.exit-choices { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.exit-choices .ghost { align-self: center; }
+.vote-countdown {
+  height: 4px; margin-top: 20px; overflow: hidden;
+  background: rgba(255,255,255,.08); border-radius: 999px;
+}
+.vote-countdown > div {
+  width: 100%; height: 100%; transform-origin: left center;
+  background: var(--gold); border-radius: inherit;
+}
 @keyframes fade { from { opacity: 0; } }
 .deed {
   width: min(340px, calc(100vw - 40px));
