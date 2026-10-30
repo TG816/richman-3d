@@ -36,6 +36,7 @@ const MIC_CONSTRAINTS = {
 const DISCONNECT_WAIT_MS = 4000; // disconnected 后先等 4 秒看能否自动恢复，避免短暂抖动就 restart
 const RESTART_DEADLINE_MS = 5000; // 一次 ICE restart 的硬截止，超时仍未恢复则升级
 const MAX_RESTARTS = 2;           // 同一连接最多连续 restart 次数，超过则强制 socket 完整重连
+const LOWPASS_FREQ = 8000;        // 发送低通截止频率（Hz）：人声能量主要在 8k 以下，更高的尖锐噪声/嘶声被滤除
 
 class Voice {
   constructor() {
@@ -43,8 +44,11 @@ class Voice {
     this.peers = new Map();      // sid -> RTCPeerConnection
     this.audios = new Map();     // sid -> <audio>（可靠播放，浏览器自动处理 autoplay/手势/track 热切换）
     this.analysers = new Map();  // sid -> 说话检测 {ctx, an, data}（只分析不出声，独立于播放）
-    this.micTrack = null;        // 开麦后的麦克风轨
+    this.micTrack = null;        // 实际发送的麦克风轨（经 lowpass 处理后的输出轨）
+    this.rawMicTrack = null;     // getUserMedia 原始轨（处理管线输入，关闭时需 stop）
+    this.micCtx = null;          // 发送处理用 AudioContext（lowpass 链路）
     this.open = false;
+    this._toggling = false;      // 开/关麦进行中标志：防止快速点击重复 getUserMedia
     this._pending = new Map();   // sid -> [candidate]（远端描述就绪前缓存）
     this.socketOffline = false;  // 信令 socket 是否处于断线状态（用于重连后重建）
   }
@@ -254,39 +258,69 @@ class Voice {
     else socket.connect();
   }
 
-  /** 开/关麦克风。首次开麦请求权限，之后只切换轨道 enabled */
+  /** 首次开麦：getUserMedia 取原始轨，经 lowpass 处理得发送轨，再热替换进所有连接 */
+  async openMicPipeline() {
+    const rawStream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
+    this.rawMicTrack = rawStream.getAudioTracks()[0];
+    // 发送链路 AudioContext（在点击手势中创建，确保 running）：source → lowpass → 输出
+    const ctx = new AudioContext();
+    if (ctx.state !== 'running') await ctx.resume();
+    const src = ctx.createMediaStreamSource(rawStream);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';                       // 低通：8kHz 以下通过，以上衰减
+    lp.frequency.value = LOWPASS_FREQ;
+    lp.Q.value = 0.7;
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(lp).connect(dest);
+    this.micCtx = ctx;
+    this.micTrack = dest.stream.getAudioTracks()[0]; // 滤掉高频后的发送轨
+    for (const pc of this.peers.values()) {
+      const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
+      if (sender) await sender.replaceTrack(this.micTrack);
+    }
+  }
+
+  /** 开/关麦克风。首次开麦建处理管线，之后只切换发送轨 enabled；防快速点击重入 */
   async toggleMic() {
-    if (this.open) {
-      if (this.micTrack) this.micTrack.enabled = false;
-      this.open = false;
-      socket.emit('voice:mute', { muted: true });
-      toast('🎙️ 已闭麦');
-      return false;
-    }
+    if (this._toggling) return this.open; // 上一次切换未完成，忽略本次点击（防抖）
+    this._toggling = true;
     try {
-      if (!this.micTrack) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
-        this.micTrack = stream.getAudioTracks()[0];
-        for (const pc of this.peers.values()) {
-          const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
-          if (sender) await sender.replaceTrack(this.micTrack);
-        }
-      } else {
-        this.micTrack.enabled = true;
+      if (this.open) {
+        if (this.micTrack) this.micTrack.enabled = false;
+        this.open = false;
+        socket.emit('voice:mute', { muted: true });
+        toast('🎙️ 已闭麦');
+        return false;
       }
-      this.open = true;
-      socket.emit('voice:mute', { muted: false });
-      toast('🎤 语音已开启');
-      return true;
-    } catch (err) {
-      toast('无法访问麦克风：' + (err.name === 'NotAllowedError' ? '权限被拒绝' : err.message), true);
-      return false;
+      try {
+        if (!this.micTrack) await this.openMicPipeline();
+        else this.micTrack.enabled = true;
+        this.open = true;
+        socket.emit('voice:mute', { muted: false });
+        toast('🎤 语音已开启');
+        return true;
+      } catch (err) {
+        toast('无法访问麦克风：' + (err.name === 'NotAllowedError' ? '权限被拒绝' : err.message), true);
+        return false;
+      }
+    } finally {
+      this._toggling = false;
     }
+  }
+
+  /** 彻底释放麦克风管线（停止采集、关闭处理 context） */
+  stopMicPipeline() {
+    try { this.rawMicTrack?.stop(); } catch { /* ignore */ }
+    try { this.micCtx?.close(); } catch { /* ignore */ }
+    this.rawMicTrack = null;
+    this.micCtx = null;
+    this.micTrack = null;
+    this.open = false;
   }
 
   teardown() {
     for (const sid of [...this.peers.keys()]) this.dropPeer(sid);
-    this.open = false;
+    this.stopMicPipeline();
   }
 
   /**
