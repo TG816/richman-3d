@@ -19,12 +19,27 @@ const ICE_SERVERS = [
   { urls: 'turn:47.86.33.146:3478?transport=tcp', username: 'richman', credential: 'Richman2026' },
 ];
 
+// 麦克风采集约束：单声道语音 + 浏览器音频处理全开，抑制回声/啸叫/杂音
+const MIC_CONSTRAINTS = {
+  channelCount: 1,            // 单声道：通话足够，且回声消除在单声道下更稳定
+  echoCancellation: true,     // AEC3 声学回声消除，压外放→麦克的回路
+  noiseSuppression: true,     // 噪声抑制，去环境杂音
+  autoGainControl: true,      // 自动增益，自动把过小的人声拉到合适电平
+  // Chromium（Chrome/Edge）legacy 约束，核心已由上面标准项覆盖，这里做兼容增强；未知项浏览器会忽略
+  googHighpassFilter: true,   // 高通滤波，切除低频轰隆声，让声音更干净
+  googEchoCancellation: true,
+  googNoiseSuppression: true,
+  googAutoGainControl: true,
+};
+
+// 对端播放增益：1.0 为原始电平，适度提升解决声音小；调太大会削波失真，1.5 是兼顾响度与不破音的经验值
+const PLAY_GAIN = 1.5;
+
 class Voice {
   constructor() {
     this.wired = false;
     this.peers = new Map();      // sid -> RTCPeerConnection
-    this.audios = new Map();     // sid -> <audio>
-    this.analysers = new Map();  // sid -> analyser record
+    this.audioCtxs = new Map();  // sid -> 接收音频图 {ctx, gain, an, data}（播放增益 + 说话检测统一在一个 AudioContext）
     this.micTrack = null;        // 开麦后的麦克风轨
     this.open = false;
     this._pending = new Map();   // sid -> [candidate]（远端描述就绪前缓存）
@@ -86,10 +101,10 @@ class Voice {
     addEventListener('keydown', () => this.resumeAll(), { once: false });
   }
 
-  /** 重新播放所有被自动播放策略挂起的对端音频 */
+  /** 手势触发：恢复所有被自动播放策略挂起的接收 AudioContext */
   resumeAll() {
-    for (const audio of this.audios.values()) {
-      if (audio.paused) audio.play().catch(() => {});
+    for (const rec of this.audioCtxs.values()) {
+      if (rec.ctx.state === 'suspended') rec.ctx.resume().catch(() => {});
     }
   }
 
@@ -113,17 +128,8 @@ class Voice {
       if (e.candidate) socket.emit('voice:signal', { to: sid, data: { candidate: e.candidate } });
     };
     pc.ontrack = (e) => {
-      let audio = this.audios.get(sid);
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.autoplay = true;
-        audio.dataset.sid = sid;
-        document.body.appendChild(audio);
-        this.audios.set(sid, audio);
-        this.watchSpeaking(sid, e.streams[0]);
-      }
-      audio.srcObject = e.streams[0];
-      audio.play?.().catch(() => {});
+      // 每个对端一套 Web Audio 图：增益播放 + 说话检测；对端 replaceTrack 不会重触发 ontrack，故只建一次
+      if (!this.audioCtxs.has(sid)) this.setupPeerAudio(sid, e.streams[0]);
     };
     pc.onconnectionstatechange = () => {
       if (['failed', 'closed'].includes(pc.connectionState)) this.dropPeer(sid);
@@ -142,9 +148,8 @@ class Voice {
   dropPeer(sid) {
     this.peers.get(sid)?.close();
     this.peers.delete(sid);
-    this.audios.get(sid)?.remove();
-    this.audios.delete(sid);
-    this.analysers.delete(sid);
+    const rec = this.audioCtxs.get(sid);
+    if (rec) { rec.ctx.close().catch(() => {}); this.audioCtxs.delete(sid); }
     this.setSpeaking(sid, false);
   }
 
@@ -159,9 +164,7 @@ class Voice {
     }
     try {
       if (!this.micTrack) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
         this.micTrack = stream.getAudioTracks()[0];
         for (const pc of this.peers.values()) {
           const sender = pc.getSenders().find((s) => s.track?.kind === 'audio');
@@ -185,18 +188,27 @@ class Voice {
     this.open = false;
   }
 
-  /** 对端音量检测 → 聊天面板绿圈提示 */
-  watchSpeaking(sid, stream) {
+  /**
+   * 对端接收音频图：source → gain（播放增益）→ destination 出声，同时旁路接 analyser 做说话检测。
+   * 一个对端只用一个 AudioContext，替代之前“audio 元素播放 + 独立分析 context”的双份结构。
+   */
+  setupPeerAudio(sid, stream) {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const srcNode = ctx.createMediaStreamSource(stream);
+      const gain = ctx.createGain();
+      gain.gain.value = PLAY_GAIN;
       const an = ctx.createAnalyser();
       an.fftSize = 256;
-      ctx.createMediaStreamSource(stream).connect(an);
-      const rec = { an, data: new Uint8Array(an.frequencyBinCount) };
-      this.analysers.set(sid, rec);
+      srcNode.connect(gain);
+      gain.connect(ctx.destination); // 实际播放出声
+      gain.connect(an);              // 说话检测旁路，不影响出声
+      const rec = { ctx, gain, an, data: new Uint8Array(an.frequencyBinCount) };
+      this.audioCtxs.set(sid, rec);
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       const loop = () => {
-        if (this.analysers.get(sid) !== rec) { ctx.close(); return; }
-        rec.an.getByteFrequencyData(rec.data);
+        if (this.audioCtxs.get(sid) !== rec) return;
+        an.getByteFrequencyData(rec.data);
         const avg = rec.data.reduce((s, v) => s + v, 0) / rec.data.length;
         this.setSpeaking(sid, avg > 10);
         requestAnimationFrame(loop);
