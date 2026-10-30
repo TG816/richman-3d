@@ -177,7 +177,8 @@ socket.on('connect', async () => {
   } catch { /* 忽略 */ }
 });
 socket.on('disconnect', () => {
-  toast('与服务器的连接断开，请刷新重连', true);
+  // Socket.IO 会自动重连（退避封顶 4 秒），无需手动刷新；重连成功后由 connect 处理 rejoin
+  toast('与服务器连接断开，正在自动重连…', true);
 });
 socket.on('connect_error', () => {
   if (store.screen === 'lobby') {

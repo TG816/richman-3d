@@ -10,6 +10,9 @@ const SAVE_DIR = fileURLToPath(new URL('../saves/', import.meta.url));
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
+// 断线后保留席位的宽限期（毫秒）：客户端在此窗口内重连即可恢复，超过才移除/破产
+const DISCONNECT_GRACE_MS = 60_000;
+
 function makeCode(existing, saved) {
   for (let i = 0; i < 50; i++) {
     let c = '';
@@ -98,7 +101,7 @@ export class RoomManager {
     room.broadcast('room:state', this.roomState(room));
   }
 
-  /** 掉线：保留席位 30 秒等待重连，期间对局照常由超时器托管 */
+  /** 掉线：保留席位 60 秒等待重连，期间对局照常由超时器托管 */
   leaveRoom(code, sid) {
     const room = this.rooms.get(code);
     if (!room) return;
@@ -110,9 +113,9 @@ export class RoomManager {
     if (room.players.every((x) => x.disconnected)) return this.destroyRoom(code);
     this.reconcileVote(room);
     room.broadcast('room:state', this.roomState(room));
-    this.broadcastChat(room, { system: true, text: `${p.name} 掉线了，30 秒内可重连…` });
+    this.broadcastChat(room, { system: true, text: `${p.name} 掉线了，60 秒内可重连…` });
     clearTimeout(room.sweepTimer);
-    room.sweepTimer = setTimeout(() => this.sweepDisconnected(code), 30_000);
+    room.sweepTimer = setTimeout(() => this.sweepDisconnected(code), DISCONNECT_GRACE_MS);
   }
 
   /** 宽限期结束：仍未重连则正式移除（对局中按破产处理） */

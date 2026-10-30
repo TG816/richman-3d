@@ -32,6 +32,11 @@ const MIC_CONSTRAINTS = {
   googAutoGainControl: true,
 };
 
+// ICE 断线恢复参数（业界分层恢复阶梯）
+const DISCONNECT_WAIT_MS = 4000; // disconnected 后先等 4 秒看能否自动恢复，避免短暂抖动就 restart
+const RESTART_DEADLINE_MS = 5000; // 一次 ICE restart 的硬截止，超时仍未恢复则升级
+const MAX_RESTARTS = 2;           // 同一连接最多连续 restart 次数，超过则强制 socket 完整重连
+
 class Voice {
   constructor() {
     this.wired = false;
@@ -41,6 +46,7 @@ class Voice {
     this.micTrack = null;        // 开麦后的麦克风轨
     this.open = false;
     this._pending = new Map();   // sid -> [candidate]（远端描述就绪前缓存）
+    this.socketOffline = false;  // 信令 socket 是否处于断线状态（用于重连后重建）
   }
 
   /* ---------- 共享静音轨 ---------- */
@@ -61,7 +67,13 @@ class Voice {
     if (this.wired) return;
     this.wired = true;
 
-    socket.on('connect', () => { if (store.room) socket.emit('voice:hello'); });
+    socket.on('connect', () => {
+      if (!this.socketOffline) return; // 首次连接无需处理
+      this.socketOffline = false;
+      // 重连后 socket.id 已变，旧 P2P 连接全部失效：清理后由 on('room')（rejoin 成功后）重新 hello 建链
+      this.resetPeers();
+      toast('已重新连接');
+    });
     on('room', () => { if (store.room && socket.connected) socket.emit('voice:hello'); });
 
     socket.on('voice:peers', ({ peers }) => {
@@ -94,7 +106,18 @@ class Voice {
       }
     });
 
-    socket.on('disconnect', () => this.teardown());
+    socket.on('disconnect', () => {
+      // 不立即销毁：Socket.IO 会自动重连，标记离线等待；媒体连接在重连后统一重建
+      this.socketOffline = true;
+      toast('网络断开，正在重连…', true);
+    });
+
+    // 浏览器级网络状态特征：系统网卡恢复时确保 Socket.IO 立即重连（Socket.IO 本身也会自动探测）
+    addEventListener('online', () => {
+      toast('网络已恢复，正在连接…');
+      if (!socket.connected) socket.connect();
+    });
+    addEventListener('offline', () => toast('网络已断开', true));
 
     // 兜底：ontrack 可能早于用户手势触发，play() 被自动播放策略拒绝后，在后续点击/按键时重试播放
     addEventListener('pointerdown', () => this.resumeAll(), { once: false });
@@ -144,11 +167,20 @@ class Voice {
       audio.play?.().catch(() => {});
     };
     pc._initiator = initiator; // 记录 offer 方：ICE restart 只由该端发起，避免双 offer 冲突
+    pc._disconnectTimer = null;
+    pc._restartAttempts = 0;
     pc.oniceconnectionstatechange = () => {
-      // 网络抖动导致 ICE failed：先尝试 ICE restart 恢复，而不是直接丢弃连接（否则会永久失声）
-      if (pc.iceConnectionState !== 'failed') return;
-      if (pc._initiator) this.restartIce(sid);
-      else socket.emit('voice:signal', { to: sid, data: { restart: true } }); // 非 offer 方请对方代为 restart
+      const st = pc.iceConnectionState;
+      clearTimeout(pc._disconnectTimer);
+      if (st === 'connected' || st === 'completed' || st === 'checking') { pc._restartAttempts = 0; return; } // 已恢复/检查中
+      if (st === 'disconnected') {
+        // disconnected 多为临时抖动：先等待自动恢复，不立即 restart（否则会把轻微抖动放大成可见中断）
+        pc._disconnectTimer = setTimeout(() => {
+          if (pc.iceConnectionState === 'disconnected') this.requestRestart(sid);
+        }, DISCONNECT_WAIT_MS);
+      } else if (st === 'failed') {
+        this.requestRestart(sid); // 持续失败：立即请求 restart
+      }
     };
     pc.onconnectionstatechange = () => {
       // 只有真正 closed（对端离开/主动关闭）才清理；failed 交给上面的 restart 处理
@@ -165,6 +197,19 @@ class Voice {
     return pc;
   }
 
+  /** 重连后清理全部失效的旧连接（新 socket.id 已变，旧 PeerConnection 无法复用） */
+  resetPeers() {
+    for (const id of [...this.peers.keys()]) this.dropPeer(id);
+  }
+
+  /** 统一发起 restart 请求：offer 方自己 restart，非 offer 方请对方代发起 */
+  requestRestart(sid) {
+    const pc = this.peers.get(sid);
+    if (!pc || pc._restarting) return;
+    if (pc._initiator) this.restartIce(sid);
+    else socket.emit('voice:signal', { to: sid, data: { restart: true } });
+  }
+
   dropPeer(sid) {
     this.peers.get(sid)?.close();
     this.peers.delete(sid);
@@ -175,21 +220,38 @@ class Voice {
     this.setSpeaking(sid, false);
   }
 
-  /** ICE 失败后重新协商恢复（仅 offer 方调用，复用现有 offer/answer 信令） */
+  /** ICE 失败后重新协商恢复（仅 offer 方调用，复用现有 offer/answer 信令）；带硬截止与升级 */
   async restartIce(sid) {
     const pc = this.peers.get(sid);
     if (!pc || pc._restarting) return;
+    if (pc._restartAttempts >= MAX_RESTARTS) return this.fullReconnect(); // 连续 restart 救不回，升级
+    pc._restartAttempts += 1;
     pc._restarting = true;
+    let deadline;
     try {
       // iceRestart 生成新的 ufrag/pwd，强制重新收集候选并检查连通性；对端走常规 offer 分支回 answer
       const offer = await pc.createOffer({ iceRestart: true });
       await pc.setLocalDescription(offer);
       socket.emit('voice:signal', { to: sid, data: { sdp: pc.localDescription } });
+      await new Promise((resolve) => { deadline = setTimeout(resolve, RESTART_DEADLINE_MS); }); // 硬截止
     } catch (err) {
       console.warn('[voice] ICE restart failed', err);
     } finally {
-      pc._restarting = false;
+      clearTimeout(deadline);
+      pc._restarting = false; // 先释放防重入锁，下面才能触发下一轮
     }
+    // 到点仍未恢复则触发下一轮（_restarting 已释放）；attempts 达上限后 requestRestart 路径会升级到 fullReconnect
+    if (this.peers.get(sid) === pc && !['connected', 'completed'].includes(pc.iceConnectionState)) {
+      this.requestRestart(sid);
+    }
+  }
+
+  /** Tier 2：ICE restart 无法恢复时，强制信令 socket 重连，走完整 rejoin + 重新建链 */
+  fullReconnect() {
+    toast('连接不稳定，正在重新建立…', true);
+    this.resetPeers();
+    if (socket.connected) { socket.disconnect(); socket.connect(); }
+    else socket.connect();
   }
 
   /** 开/关麦克风。首次开麦请求权限，之后只切换轨道 enabled */
