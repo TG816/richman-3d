@@ -1,3 +1,4 @@
+import { listeningControls } from './listening.js';
 import { BOARD, GROUPS } from '@board';
 import { socket, emitAck } from '../net/socket.js';
 import { store, isMyTurn, currentPlayer, playerById, on, toast } from '../game/store.js';
@@ -178,6 +179,7 @@ function renderPlayers() {
         <div class="pmoney">¥ ${p.money.toLocaleString('en-US')}</div>
         <div class="pmeta">地产 ${owned.length} 处 · 房 ${houses}${p.getOutCards ? ' · 🎟️x' + p.getOutCards : ''}</div>
       </div>`;
+    card.appendChild(listeningControls(p));
     box.appendChild(card);
   }
 }

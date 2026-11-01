@@ -1,3 +1,4 @@
+import { ListeningSettings } from './listening.js';
 import { socket } from '../net/socket.js';
 // 注意：on 必须来自 store 事件总线——进房通知 emit('room') 走的是 bus，不是 Socket.IO；
 // 之前误从 socket.js 导入 on，导致 socket.on('room') 永远收不到、voice:hello 不发、P2P 连接从未建立
@@ -40,6 +41,8 @@ const LOWPASS_FREQ = 8000;        // 发送低通截止频率（Hz）：人声�
 
 class Voice {
   constructor() {
+    this.listening = new ListeningSettings();
+    this.listeningRoom = null;
     this.wired = false;
     this.peers = new Map();      // sid -> RTCPeerConnection
     this.audios = new Map();     // sid -> <audio>（可靠播放，浏览器自动处理 autoplay/手势/track 热切换）
@@ -79,7 +82,12 @@ class Voice {
       this.resetPeers();
       toast('已重新连接');
     });
-    on('room', () => { if (store.room && socket.connected) socket.emit('voice:hello'); });
+    on('room', () => {
+      const code = store.room?.code ?? null;
+      if (code !== this.listeningRoom) { this.listening.clear(); this.listeningRoom = code; }
+      this.applyListening();
+      if (store.room && socket.connected) socket.emit('voice:hello');
+    });
 
     socket.on('voice:peers', ({ peers }) => {
       for (const sid of peers) this.connectTo(sid, true);
@@ -142,6 +150,19 @@ class Voice {
     }
   }
 
+  /** socket ID 会随重连变化，因此用房间成员的稳定玩家 ID 查找设置。 */
+  applyListening() {
+    for (const [sid, audio] of this.audios) {
+      const player = store.room?.players.find(p => p.sid === sid);
+      if (player) this.listening.apply(player.id, audio);
+    }
+  }
+
+  setListening(playerId, changes) {
+    this.listening.set(playerId, changes);
+    this.applyListening();
+  }
+
   async flushCandidates(sid) {
     const list = this._pending.get(sid);
     const pc = this.peers.get(sid);
@@ -172,6 +193,7 @@ class Voice {
         this.watchSpeaking(sid, e.streams[0]);
       }
       audio.srcObject = e.streams[0];
+      this.applyListening();
       audio.play?.().catch(() => {});
     };
     pc._initiator = initiator; // 记录 offer 方：ICE restart 只由该端发起，避免双 offer 冲突

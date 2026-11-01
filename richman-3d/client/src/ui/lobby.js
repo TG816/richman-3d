@@ -1,3 +1,4 @@
+import { listeningControls } from './listening.js';
 import { AVATARS } from '@board';
 import { socket, emitAck, on } from '../net/socket.js';
 import { NET } from '../net/config.js';
@@ -155,6 +156,7 @@ export function initLobby() {
       const chip = document.createElement('div');
       chip.className = 'pchip';
       chip.innerHTML = `<div class="dot" style="background:${av.color}"></div><b>${escapeHtml(p.name)}</b>${i === 0 ? '<span class="host">房主</span>' : ''}${p.id === store.me?.id ? '<span class="host" style="color:#9aa3c7;border-color:#3a4470">我</span>' : ''}`;
+      chip.appendChild(listeningControls(p));
       list.appendChild(chip);
     });
     const isHost = room.players[0]?.id === store.me?.id;

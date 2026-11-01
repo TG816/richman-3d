@@ -403,3 +403,11 @@ body {
   .announce { top: 24%; }
   .status-text { font-size: 12px; }
 }
+
+/* 队友收听设置：在玩家卡片中换行，避免挤压昵称和资产。 */
+.pchip:has(.listening-controls), .pcard:has(.listening-controls) { flex-wrap: wrap; }
+.listening-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-basis: 100%; font-size: 12px; }
+.listening-controls:empty { display: none; }
+.listening-controls label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 140px; }
+.listening-controls input { min-width: 60px; width: 90px; flex: 1; accent-color: #e9bd65; }
+.listening-controls button[aria-pressed="true"] { color: #ffbd9d; border-color: #c77b68; }
