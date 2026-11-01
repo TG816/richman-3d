@@ -1,3 +1,4 @@
+import { copyRoomCode } from './clipboard.js';
 import { BOARD, GROUPS } from '@board';
 import { socket, emitAck } from '../net/socket.js';
 import { store, isMyTurn, currentPlayer, playerById, on, toast } from '../game/store.js';
@@ -95,8 +96,8 @@ export function initHud() {
   });
 
   $('hudCode').onclick = async () => {
-    const link = location.origin + location.pathname + '?room=' + (store.room?.code || $('hudCode').textContent);
-    try { await navigator.clipboard.writeText(link); toast('邀请链接已复制！'); }
+    if (!store.room?.code) return;
+    try { await copyRoomCode(store.room.code); toast('房间码已复制！'); }
     catch { toast('复制失败，房间码：' + store.room?.code, true); }
   };
 
