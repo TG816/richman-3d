@@ -27,8 +27,7 @@ function playRandomGame(seedLog = false) {
     const a = legal[Math.floor(Math.random() * legal.length)];
     switch (a) {
       case 'build': {
-        const mine = Object.entries(e.props).filter(([, v]) => v.owner === pid && v.houses < 5);
-        if (mine.length) e.build(pid, +mine[0][0]);
+        e.build(pid, e.pending.tile);
         break;
       }
       case 'sellHouse': {

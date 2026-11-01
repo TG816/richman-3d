@@ -9,7 +9,8 @@ const $ = (id) => document.getElementById(id);
 export function initHud() {
   /* 行动按钮 → 服务端动作 */
   $('btnRoll').onclick = () => act('roll');
-  $('btnBuy').onclick = () => act('buy');
+  $('btnBuy').onclick = () => store.snap?.phase === 'upgrade'
+    ? act('build', { tile: store.snap.pending.tile }) : act('buy');
   $('btnDecline').onclick = () => act('decline');
   $('btnEnd').onclick = () => act('endTurn');
   $('btnPayJail').onclick = () => act('payJail');
@@ -203,14 +204,22 @@ function renderActions() {
       status.innerHTML = cur?.inJail
         ? '你在监狱中：掷出<b>双数</b>即可出狱（第 ' + (cur.jailTurns + 1) + ' 次尝试）'
         : (s.lastRoll?.doubles ? '🎉 双数！再来一次' : '轮到你了，掷骰子吧！');
+    } else if (s.phase === 'upgrade') {
+      const t = BOARD[s.pending.tile];
+      const cost = GROUPS[t.group].houseCost;
+      show('btnBuy', cur.money >= cost);
+      $('btnBuy').textContent = `升级一级 ¥${cost.toLocaleString()}`;
+      show('btnDecline', true);
+      status.innerHTML = `再次停在「<b>${t.name}</b>」，可升级一级${cur.money < cost ? '（资金不足，请选择放弃）' : ''}。`;
     } else if (s.phase === 'buy') {
+      $('btnBuy').textContent = '💸 买下它';
       const t = BOARD[s.pending.tile];
       show('btnBuy', s.players[s.turn].money >= t.price);
       show('btnDecline', true);
       status.innerHTML = `是否买下「<b>${t.name}</b>」（¥${t.price.toLocaleString('en-US')}）？`;
     } else if (s.phase === 'end') {
       show('btnEnd', true);
-      status.innerHTML = '本回合结束前，可点击地产进行<b>建房/抵押</b>经营';
+      status.innerHTML = '本回合结束前，可点击地产进行<b>拆房/抵押</b>经营';
     }
   } else {
     status.innerHTML = `等待 <b>${curName}</b> 行动…`;
@@ -297,13 +306,8 @@ export function openDeed(tileIndex) {
   const canManage = s && owner && owner.id === store.me?.id && isMyTurn() && ['roll', 'end'].includes(s.phase);
   if (canManage && isProp) {
     const cost = GROUPS[t.group].houseCost;
-    // 新规则：买过就能建房，只要未抵押且未到酒店即可点击
-    let buildBtn = '';
-    if (info.houses < 5 && !info.mortgaged) {
-      buildBtn = `<button class="btn btn-gold btn-mini" data-act="build">建房 ¥${cost.toLocaleString()}</button>`;
-    }
+    // 地契仅展示房屋信息，不提供远程升级入口。
     actions = `<div class="deed-actions">
-      ${buildBtn}
       ${info.houses > 0 ? `<button class="btn btn-glass btn-mini" data-act="sellHouse">拆房退 ¥${cost / 2}</button>` : ''}
       ${!info.mortgaged ? `<button class="btn btn-glass btn-mini" data-act="mortgage">抵押 +¥${(t.price / 2).toLocaleString()}</button>`
         : `<button class="btn btn-gold btn-mini" data-act="unmortgage">赎回 -¥${Math.ceil(t.price / 2 * 1.1).toLocaleString()}</button>`}

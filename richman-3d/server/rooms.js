@@ -464,7 +464,7 @@ export class RoomManager {
       const current = room.players.find((p) => p.id === engine.players[engine.turn]?.id);
       if (!current) return;
       try {
-        if (engine.phase === 'buy') engine.decline();
+        if (['buy', 'upgrade'].includes(engine.phase)) engine.decline();
         else if (engine.phase === 'end') engine.endTurn();
         else if (engine.phase === 'roll') engine.roll();
         room.broadcast('game:events', { events: engine.drainEvents() });

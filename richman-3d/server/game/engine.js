@@ -77,11 +77,13 @@ export class GameEngine {
     if (!p || p.id !== playerId || p.bankrupt) return false;
     switch (action) {
       case 'roll': return this.phase === 'roll';
-      case 'buy': case 'decline': return this.phase === 'buy';
+      case 'buy': return this.phase === 'buy';
+      case 'decline': return ['buy', 'upgrade'].includes(this.phase);
+      case 'build': return this.phase === 'upgrade';
       case 'endTurn': return this.phase === 'end';
       case 'payJail': case 'useCard':
         return this.phase === 'roll' && p.inJail;
-      case 'build': case 'sellHouse': case 'mortgage': case 'unmortgage':
+      case 'sellHouse': case 'mortgage': case 'unmortgage':
         return this.phase === 'roll' || this.phase === 'end';
       default: return false;
     }
@@ -125,6 +127,13 @@ export class GameEngine {
   }
 
   decline() {
+    if (this.phase === 'upgrade') {
+      const p = this.players[this.turn];
+      const noExtra = this.pending.noExtra;
+      this.addLog(`${p.name} 放弃本次地产升级`);
+      this.finishAction(p, { noExtra });
+      return;
+    }
     if (this.phase !== 'buy') return;
     const p = this.players[this.turn];
     this.addLog(`${p.name} 放弃购买「${BOARD[this.pending.tile].name}」`);
@@ -132,10 +141,13 @@ export class GameEngine {
   }
 
   build(playerId, tile) {
+    // 升级资格只由落点产生，不能通过地契或重复请求远程建房。
+    if (!this.can(playerId, 'build') || this.pending?.tile !== tile
+      || this.players[this.turn].pos !== tile) return;
     const info = this.props[tile];
     const t = BOARD[tile];
     if (!info || info.owner !== playerId || t.type !== 'prop') return;
-    // 新规则：只要自己买过这块地就能建房，不再要求集齐同色组或均匀建房
+    // 普通升级一次只增加一级，完成后立即消耗本次落点机会。
     if (info.mortgaged) return this.toast('地块已抵押，不能建房');
     if (info.houses >= 5) return this.toast('这里已是酒店');
     const cost = GROUPS[t.group].houseCost;
@@ -143,8 +155,10 @@ export class GameEngine {
     if (p.money < cost) return this.toast('资金不足');
     this.transfer(playerId, null, cost, `在「${t.name}」施工`);
     info.houses++;
+    const noExtra = this.pending.noExtra;
     this.emit({ type: 'build', tile, houses: info.houses, player: playerId });
     this.addLog(`${p.name} 在「${t.name}」${info.houses === 5 ? '建成酒店 🏨' : `建成第 ${info.houses} 栋房 🏠`}`);
+    this.finishAction(p, { noExtra });
   }
 
   sellHouse(playerId, tile) {
@@ -273,7 +287,15 @@ export class GameEngine {
           this.emit({ type: 'offer', player: p.id, tile: idx });
           return; // 等待买/放弃
         }
-        if (info.owner === p.id) { this.addLog(`${p.name} 回到自家「${t.name}」`); break; }
+        if (info.owner === p.id) {
+          this.addLog(`${p.name} 回到自家「${t.name}」`);
+          if (t.type === 'prop' && !info.mortgaged && info.houses < 5) {
+            this.phase = 'upgrade';
+            this.pending = { tile: idx, noExtra: !!noExtra };
+            return; // 等待升级一级或放弃；购买流程不会进入这里
+          }
+          break;
+        }
         if (info.mortgaged) { this.addLog(`「${t.name}」处于抵押中，免收租金`); break; }
         const owner = this.players.find((x) => x.id === info.owner);
         if (!owner || owner.bankrupt) break;
@@ -405,6 +427,7 @@ export class GameEngine {
   }
 
   finishAction(p, { noExtra = false } = {}) {
+    this.pending = null;
     if (p.bankrupt) return;               // 破产时 advanceTurn 已在 bankruptPlayer 中完成
     if (this.checkWin()) return;
     if (this.lastRoll?.doubles && !noExtra && !p.justJailed) {
@@ -427,6 +450,7 @@ export class GameEngine {
       if (this.round > config.ROUND_LIMIT) return this.finishByAssets();
     }
     this.turn = next;
+    this.pending = null;
     this.players.forEach((p) => { p.doublesCount = 0; p.justJailed = false; });
     this.phase = 'roll';
     this.lastRoll = null;
