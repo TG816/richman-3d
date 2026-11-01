@@ -1,4 +1,3 @@
-import { copyRoomCode } from './clipboard.js';
 import { AVATARS } from '@board';
 import { socket, emitAck, on } from '../net/socket.js';
 import { NET } from '../net/config.js';
@@ -100,9 +99,10 @@ export function initLobby() {
 
   $('btnCopy').onclick = async () => {
     if (!store.room) return;
+    const link = NET.inviteUrl(store.room.code);
     try {
-      await copyRoomCode(store.room.code);
-      toast('房间码已复制，发给朋友吧！');
+      await navigator.clipboard.writeText(link);
+      toast('邀请链接已复制，发给朋友吧！');
     } catch {
       toast(`房间码：${store.room.code}（复制失败，请手动记录）`, true);
     }
