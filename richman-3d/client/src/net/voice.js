@@ -56,7 +56,8 @@ class Voice {
   /* ---------- 共享静音轨 ---------- */
   silentTrack() {
     if (this._silent) return this._silent;
-    const ctx = new AudioContext();
+    this._silentCtx = new AudioContext(); // 保存引用，teardown 时一并关闭，避免上下文泄漏
+    const ctx = this._silentCtx;
     const dst = ctx.createMediaStreamDestination();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -126,6 +127,9 @@ class Voice {
     // 兜底：ontrack 可能早于用户手势触发，play() 被自动播放策略拒绝后，在后续点击/按键时重试播放
     addEventListener('pointerdown', () => this.resumeAll(), { once: false });
     addEventListener('keydown', () => this.resumeAll(), { once: false });
+
+    // 直接关标签页/浏览器时兜底释放连接与麦克风（正常退出走按钮 teardown，这里防直接关页面）
+    addEventListener('pagehide', () => this.teardown());
   }
 
   /** 手势触发：重播被自动播放策略挂起的 audio，并恢复分析用 context */
@@ -321,6 +325,9 @@ class Voice {
   teardown() {
     for (const sid of [...this.peers.keys()]) this.dropPeer(sid);
     this.stopMicPipeline();
+    try { this._silentCtx?.close(); } catch { /* ignore */ } // 关闭静音占位轨的 AudioContext
+    this._silentCtx = null;
+    this._silent = null;
   }
 
   /**
