@@ -6,6 +6,24 @@ export function initBgm() {
   audio.preload = 'none';
   audio.loop = true;
   audio.volume = 0.25;
+  const panel = document.createElement('div');
+  panel.className = 'bgm-panel';
+  const label = document.createElement('label');
+  label.className = 'bgm-volume';
+  const caption = document.createElement('span');
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0'; slider.max = '100'; slider.step = '1'; slider.value = '25';
+  slider.setAttribute('aria-label', '背景音乐音量');
+  const updateVolume = () => {
+    // 仅调节音量，不触发播放；关闭音乐期间也能预先设置。
+    audio.volume = Number(slider.value) / 100;
+    caption.textContent = `音乐音量 ${slider.value}%`;
+    slider.setAttribute('aria-valuetext', `${slider.value}%`);
+  };
+  slider.addEventListener('input', updateVolume);
+  updateVolume();
+  label.append(caption, slider);
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'bgm-toggle';
@@ -32,5 +50,6 @@ export function initBgm() {
   audio.addEventListener('error', () => { audio.pause(); render(); });
   addEventListener('pagehide', () => audio.pause());
   render();
-  document.body.appendChild(button);
+  panel.append(label, button);
+  document.body.appendChild(panel);
 }
