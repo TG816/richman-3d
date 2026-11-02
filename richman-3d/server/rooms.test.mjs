@@ -64,3 +64,23 @@ test('拒绝结束投票会保留对局，且恢复码校验拒绝路径输入',
   assert.equal(room.vote, null);
   assert.equal(manager.resumeRoom('..../').error, '存档码格式错误');
 });
+
+
+test('房间快照提供语音连接映射，重连后仍能应用同一玩家的本地静音', async () => {
+  const { ListeningSettings } = await import('../client/src/net/listening.js');
+  const { manager } = createManager();
+  const room = createStartedRoom(manager);
+  try {
+    const settings = new ListeningSettings();
+    settings.set('player-b', { muted: true, volume: .3 });
+    const applySnapshot = sid => {
+      const player = manager.roomState(room).players.find(p => p.sid === sid);
+      assert.ok(player, '快照必须能通过语音连接找到玩家');
+      const audio = {}; settings.apply(player.id, audio);
+      assert.deepEqual(audio, { muted: true, volume: .3 });
+    };
+    applySnapshot('sid-b');
+    manager.rejoin('ABCD', 'player-b', 'sid-b-new');
+    applySnapshot('sid-b-new');
+  } finally { manager.destroyRoom('ABCD'); }
+});

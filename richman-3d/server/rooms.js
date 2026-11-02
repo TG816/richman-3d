@@ -394,7 +394,7 @@ export class RoomManager {
       code: room.code,
       started: room.started,
       players: room.players.map((p) => ({
-        id: p.id, name: p.name, avatarId: p.avatarId, disconnected: !!p.disconnected,
+        id: p.id, sid: p.sid, name: p.name, avatarId: p.avatarId, disconnected: !!p.disconnected,
       })),
       hostSid: room.players[0]?.sid ?? null,
       maxPlayers: config.MAX_PLAYERS,
