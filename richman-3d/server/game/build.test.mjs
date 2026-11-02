@@ -56,3 +56,32 @@ test('资金不足可放弃，抵押和满级地产不触发升级', () => {
   e.props[tile].mortgaged = false; e.props[tile].houses = 5;
   e.resolveTile(e.players[0]); assert.equal(e.phase, 'end');
 });
+
+
+for (const action of ['buy', 'decline']) {
+  for (const restore of [false, true]) {
+    test(`双数出狱后${action === 'buy' ? '购买' : '放弃'}无主地产不能再掷${restore ? '（恢复存档）' : ''}`, () => {
+      let e = new GameEngine(['甲', '乙'].map(id => ({ id, name: id })));
+      const p = e.players[0];
+      p.pos = 10; p.inJail = true; p.money = 100000;
+      e.dice = [1, 1]; e.lastRoll = { dice: [1, 1], doubles: true, by: p.id };
+      e.rollInJail(p, true);
+      assert.equal(p.inJail, false);
+      assert.equal(e.phase, 'buy');
+      assert.equal(e.pending.noExtra, true);
+      if (restore) e = GameEngine.fromSnapshot(e.snapshot());
+      e[action]();
+      assert.equal(e.phase, 'end');
+      assert.equal(e.can('甲', 'roll'), false);
+      assert.equal(e.pending, null);
+      e.endTurn(); assert.equal(e.players[e.turn].id, '乙');
+    });
+  }
+  test(`普通双数后${action === 'buy' ? '购买' : '放弃'}仍允许再次掷骰`, () => {
+    const e = new GameEngine(['甲', '乙'].map(id => ({ id, name: id })));
+    e.players[0].pos = tile; e.players[0].money = 100000;
+    e.lastRoll = { dice: [1, 1], doubles: true, by: '甲' };
+    e.resolveTile(e.players[0], false); e[action]();
+    assert.equal(e.phase, 'roll'); assert.equal(e.can('甲', 'roll'), true);
+  });
+}

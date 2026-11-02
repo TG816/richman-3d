@@ -116,14 +116,14 @@ export class GameEngine {
   buy() {
     if (this.phase !== 'buy') return;
     const p = this.players[this.turn];
-    const { tile } = this.pending;
+    const { tile, noExtra = false } = this.pending;
     const t = BOARD[tile];
     if (p.money < t.price) return this.toast(`${p.name} 资金不足，无法购买`);
     this.transfer(p.id, null, t.price, `购入「${t.name}」`);
     this.props[tile] = { owner: p.id, houses: 0, mortgaged: false };
     this.emit({ type: 'buy', player: p.id, tile, price: t.price });
     this.addLog(`${p.name} 以 ¥${t.price} 购入「${t.name}」`);
-    this.finishAction(p);
+    this.finishAction(p, { noExtra });
   }
 
   decline() {
@@ -136,8 +136,9 @@ export class GameEngine {
     }
     if (this.phase !== 'buy') return;
     const p = this.players[this.turn];
+    const { noExtra = false } = this.pending;
     this.addLog(`${p.name} 放弃购买「${BOARD[this.pending.tile].name}」`);
-    this.finishAction(p);
+    this.finishAction(p, { noExtra });
   }
 
   build(playerId, tile) {
@@ -283,7 +284,8 @@ export class GameEngine {
         const info = this.props[idx];
         if (!info) {
           this.phase = 'buy';
-          this.pending = { tile: idx };
+          // 购地等待跨越一次动作请求，必须保留出狱或特殊移动的禁止再掷标记。
+          this.pending = { tile: idx, noExtra: !!noExtra };
           this.emit({ type: 'offer', player: p.id, tile: idx });
           return; // 等待买/放弃
         }
