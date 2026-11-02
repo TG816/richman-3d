@@ -337,6 +337,11 @@ class Voice {
     this.requestRestart(sid);
   }
 
+  /** 对局快照只有玩家 ID，连接 ID 从最新房间成员映射，重连后也不会过期。 */
+  peerId(playerId) {
+    return store.room?.players.find(p => p.id === playerId)?.sid;
+  }
+
   getStatus(sid) {
     const player = store.room?.players.find(p => p.sid === sid);
     if (player?.disconnected) return '队友离线';
@@ -351,7 +356,7 @@ class Voice {
 
   renderStatuses() {
     for (const el of document.querySelectorAll('[data-voice-status]')) {
-      el.textContent = `语音：${this.getStatus(el.dataset.voiceStatus)}`;
+      el.textContent = `语音：${this.getStatus(this.peerId(el.dataset.voiceStatus))}`;
     }
   }
 

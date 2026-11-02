@@ -77,3 +77,14 @@ test('手动重试应答方会通知发起方重置预算', () => {
   assert.equal(sent.some(x => x[1]?.data?.retry === true), true);
   assert.equal(pc._restartAttempts, 1);
 });
+
+test('对局玩家无 sid 时按稳定 ID 查询状态，重连后使用新 sid', () => {
+  const { voice, store } = setup();
+  store.room.players[0].id = 'player1';
+  voice.setStatus('a', '已连接');
+  assert.equal(voice.getStatus(voice.peerId('player1')), '已连接');
+  store.room.players[0].sid = 'new-a';
+  voice.setStatus('new-a', '连接中');
+  assert.equal(voice.peerId('player1'), 'new-a');
+  assert.equal(voice.getStatus(voice.peerId('player1')), '连接中');
+});
