@@ -25,7 +25,7 @@ export class GameEngine {
     this.players = players.map((p, i) => ({
       id: p.id, name: p.name, avatarId: p.avatarId, color: p.color,
       order: i, pos: 0, money: config.START_MONEY,
-      inJail: false, jailTurns: 0, getOutCards: 0, bankrupt: false,
+      inJail: false, jailTurns: 0, getOutCards: 0, getOutSources: [], bankrupt: false,
       doublesCount: 0, justJailed: false,
     }));
     this.turn = 0;
@@ -48,20 +48,36 @@ export class GameEngine {
   /* ================= 对外接口 ================= */
 
   /** 从存档快照恢复引擎（用于"保存并退出"后的继续对局）。
-   * 牌库顺序本就不外泄，恢复时按剩余张数重新洗牌，不影响公平性。 */
+   * 新存档恢复服务端牌库；旧存档缺少来源时按机会、命运顺序兼容分配，不推断真实历史。 */
   static fromSnapshot(snap) {
     const eng = Object.create(GameEngine.prototype);
-    eng.players = snap.players.map((p) => ({ ...p }));
+    eng.players = snap.players.map((p) => ({ ...p, getOutSources: [...(p.getOutSources || [])] }));
     eng.turn = snap.turn;
     eng.round = snap.round;
     eng.phase = snap.phase;
     eng.pending = snap.pending;
     eng.lastRoll = snap.lastRoll;
     eng.props = Object.fromEntries(Object.entries(snap.props || {}).map(([k, v]) => [k, { ...v }]));
-    eng.decks = { chance: shuffle([...CHANCE]), fate: shuffle([...FATE]) };
-    eng.discard = { chance: [], fate: [] };
-    eng.decks.chance.splice(0, Math.max(0, eng.decks.chance.length - (snap.decksLeft?.chance ?? 12)));
-    eng.decks.fate.splice(0, Math.max(0, eng.decks.fate.length - (snap.decksLeft?.fate ?? 12)));
+    const available = new Set(['chance', 'fate']);
+    for (const p of eng.players) for (const source of p.getOutSources) available.delete(source);
+    for (const p of eng.players) {
+      // 旧版重复卡不可追溯，最多兼容两张实体卡，优先保留已有来源。
+      if (!snap.players.find(old => old.id === p.id)?.getOutSources) {
+        p.getOutSources = [...available].slice(0, p.getOutCards || 0);
+        p.getOutSources.forEach(source => available.delete(source));
+      }
+      p.getOutCards = p.getOutSources.length;
+    }
+    if (snap.cardState) {
+      eng.decks = structuredClone(snap.cardState.decks);
+      eng.discard = structuredClone(snap.cardState.discard);
+    } else {
+      eng.decks = {
+        chance: shuffle(CHANCE.filter(c => c.effect.type !== 'getout' || available.has('chance'))),
+        fate: shuffle(FATE.filter(c => c.effect.type !== 'getout' || available.has('fate'))),
+      };
+      eng.discard = { chance: [], fate: [] };
+    }
     eng.dice = snap.lastRoll?.dice ?? [1, 1];
     eng.winner = snap.winner ? eng.players.find((p) => p.id === snap.winner) || null : null;
     eng.lastRanking = snap.ranking ?? null;
@@ -216,10 +232,12 @@ export class GameEngine {
   useCard() {
     const p = this.players[this.turn];
     if (!p.inJail || p.getOutCards <= 0) return;
-    p.getOutCards--;
+    const source = p.getOutSources.shift();
+    p.getOutCards = p.getOutSources.length;
     p.inJail = false;
     p.jailTurns = 0;
-    this.decks.chance.push(CHANCE.find((c) => c.effect.type === 'getout')); // 回牌库底
+    const pool = source === 'fate' ? FATE : CHANCE;
+    this.decks[source].push(pool.find(c => c.effect.type === 'getout')); // 归还原牌库底
     this.addLog(`${p.name} 使用出狱许可证出狱`);
     this.emit({ type: 'jailOut', player: p.id, how: 'card' });
   }
@@ -314,10 +332,10 @@ export class GameEngine {
           this.discard[d] = [];
         }
         const card = this.decks[d].shift();
-        this.discard[d].push(card);
+        if (card.effect.type !== 'getout') this.discard[d].push(card);
         this.addLog(`${p.name} 抽到${t.name}卡「${card.title}」：${card.text}`);
         this.emit({ type: 'card', player: p.id, deck: d, card });
-        return this.applyCard(p, card, noExtra);
+        return this.applyCard(p, card, noExtra, d);
       }
       case 'tax':
         this.addLog(`${p.name} 缴纳${t.name} ¥${t.amount}`);
@@ -340,7 +358,7 @@ export class GameEngine {
     this.finishAction(p, { noExtra });
   }
 
-  applyCard(p, card, noExtra) {
+  applyCard(p, card, noExtra, source) {
     const e = card.effect;
     switch (e.type) {
       case 'money':
@@ -364,7 +382,8 @@ export class GameEngine {
       case 'jail':
         return this.sendToJail(p);
       case 'getout':
-        p.getOutCards++;
+        p.getOutSources.push(source);
+        p.getOutCards = p.getOutSources.length;
         break;
       case 'repairs': {
         let total = 0;
@@ -549,6 +568,13 @@ export class GameEngine {
 
   bankruptPlayer(p, creditor) {
     p.bankrupt = true;
+    // 破产退出时归还持有卡，避免卡片随角色永久消失。
+    for (const source of p.getOutSources) {
+      const pool = source === 'fate' ? FATE : CHANCE;
+      this.decks[source].push(pool.find(c => c.effect.type === 'getout'));
+    }
+    p.getOutSources = [];
+    p.getOutCards = 0;
     for (const [idx, info] of Object.entries(this.props)) {
       if (info.owner !== p.id) continue;
       if (info.houses > 0) {
@@ -585,9 +611,14 @@ export class GameEngine {
   toast(text) { this.emit({ type: 'toast', text }); }
 
   /** 客户端可见快照（牌库顺序不外泄） */
+  /** 仅服务端写盘，完整牌库顺序不得随客户端快照广播。 */
+  saveSnapshot() {
+    return { ...this.snapshot(), cardState: structuredClone({ decks: this.decks, discard: this.discard }) };
+  }
+
   snapshot() {
     return {
-      players: this.players.map((p) => ({ ...p })),
+      players: this.players.map((p) => ({ ...p, getOutSources: [...p.getOutSources] })),
       turn: this.turn,
       round: this.round,
       phase: this.phase,

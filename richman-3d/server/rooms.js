@@ -288,7 +288,7 @@ export class RoomManager {
   saveGame(room) {
     try {
       fs.mkdirSync(this.saveDir, { recursive: true });
-      const data = { code: room.code, savedAt: Date.now(), snapshot: room.engine.snapshot() };
+      const data = { code: room.code, savedAt: Date.now(), snapshot: room.engine.saveSnapshot() };
       const file = path.join(this.saveDir, `${room.code}.json`);
       const temp = path.join(this.saveDir, `.${room.code}-${randomUUID()}.tmp`);
       fs.writeFileSync(temp, JSON.stringify(data), { flag: 'wx' });
