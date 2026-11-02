@@ -439,13 +439,3 @@ body {
 }
 @media (max-width: 600px) { .dice-result { font-size: 14px; padding: 6px 10px; } }
 
-/* 独立骰子窗口放在音乐控件上方，避免遮挡顶部卡片及底部行动栏。 */
-.dice-preview {
-  position: fixed; left: max(12px, env(safe-area-inset-left));
-  bottom: calc(116px + env(safe-area-inset-bottom)); z-index: 40;
-  width: 196px; border-radius: 12px; background: rgba(28,36,61,.9);
-  border: 1px solid #e4c477; color: #fff0ba; pointer-events: none;
-}
-.dice-preview > div { text-align: center; font-size: 12px; padding-top: 7px; }
-.dice-preview canvas { display: block; width: 100% !important; height: auto !important; }
-@media (max-width:600px) { .dice-preview { width: 136px; } }

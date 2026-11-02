@@ -20,7 +20,7 @@ const canvas = document.getElementById('gl');
 const scene3 = createScene(canvas);
 const board = buildBoard(scene3.scene);
 const tokens = new Tokens(scene3.scene);
-const dice = new Dice();
+const dice = new Dice(scene3.scene);
 const diceResult = createDiceResult();
 const effects = new Effects(scene3.scene);
 scene3.tickers.push((dt) => dice.update(dt));
@@ -324,8 +324,20 @@ class Director {
     switch (e.type) {
       case 'dice': {
         diceResult.rolling(this.nameOf(e.player));
+        const rec = tokens.map.get(e.player);
+        const base = tileWorldPos(rec?.tile ?? 0, 0);
+        // 在当前格子正上方悬空投掷，高度超过地产建筑顶部。
+        let height = 5.5;
+        for (const building of Object.values(board.buildingGroups)) {
+          const bounds = new THREE.Box3().setFromObject(building);
+          if (!bounds.isEmpty()) height = Math.max(height, bounds.max.y + 1.2);
+        }
+        dice.group.position.set(base.x, height, base.z);
+        scene3.focusOn(new THREE.Vector3(base.x, height + .8, base.z));
         await dice.roll(e.dice);
         if (store.room) diceResult.show(this.nameOf(e.player), e.dice);
+        await sleep(650); // 落定后稍作停留，方便看清朝上的骰面
+        dice.hide();
         break;
       }
       case 'move': {
