@@ -240,6 +240,7 @@ class Voice {
       }
     };
     pc.onconnectionstatechange = () => {
+      this.renderStatuses();
       // 只有真正 closed（对端离开/主动关闭）才清理；failed 交给上面的 restart 处理
       if (pc.connectionState === 'closed') this.dropPeer(sid);
     };
@@ -346,7 +347,14 @@ class Voice {
     const player = store.room?.players.find(p => p.sid === sid);
     if (player?.disconnected) return '队友离线';
     if (!socket.connected) return '游戏连接中断';
-    return this.statuses.get(sid) || '等待连接';
+    if (!sid) return '成员连接信息未同步';
+    const pc = this.peers.get(sid);
+    const status = this.statuses.get(sid);
+    if (pc && (pc.connectionState === 'connected' || ['connected', 'completed'].includes(pc.iceConnectionState))) {
+      if (status === '播放被阻止，请点击页面' || status === '音频播放失败') return status;
+      return this.audios.get(sid)?.paused ? '点击页面启用播放' : '已连接';
+    }
+    return status || (pc ? '连接中' : '等待连接');
   }
 
   setStatus(sid, text) {

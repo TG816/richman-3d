@@ -88,3 +88,12 @@ test('对局玩家无 sid 时按稳定 ID 查询状态，重连后使用新 sid'
   assert.equal(voice.peerId('player1'), 'new-a');
   assert.equal(voice.getStatus(voice.peerId('player1')), '连接中');
 });
+
+test('真实连接已连通时不受缓存提示缺失影响，并区分成员映射缺失', () => {
+  const { voice } = setup(); const pc = voice.connectTo('a', false);
+  voice.statuses.delete('a'); pc.connectionState = 'connected';
+  assert.equal(voice.getStatus('a'), '已连接');
+  assert.equal(voice.getStatus(undefined), '成员连接信息未同步');
+  voice.statuses.set('a', '播放被阻止，请点击页面');
+  assert.equal(voice.getStatus('a'), '播放被阻止，请点击页面');
+});
