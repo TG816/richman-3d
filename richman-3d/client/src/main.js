@@ -1,3 +1,4 @@
+import { initBgm } from './audio/bgm.js';
 import * as THREE from 'three';
 import { createScene } from './three/scene.js';
 import { buildBoard, attachPicking, tileWorldPos, cellDirs, setTileOwner, setTileHouses, moveHighlight, pulseTile } from './three/board.js';
@@ -34,6 +35,7 @@ try {
   initLobby();
   initHud();
   initChat();
+  initBgm();
   voice.wire();
 } catch (err) {
   console.error('[init]', err);

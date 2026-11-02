@@ -411,3 +411,15 @@ body {
 .listening-controls label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 140px; }
 .listening-controls input { min-width: 60px; width: 90px; flex: 1; accent-color: #e9bd65; }
 .listening-controls button[aria-pressed="true"] { color: #ffbd9d; border-color: #c77b68; }
+
+/* 背景音乐独立开关，兼容手机底部安全区。 */
+.bgm-toggle {
+  position: fixed; left: max(14px, env(safe-area-inset-left));
+  bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 90;
+  padding: 10px 14px; border: 1px solid #e4c477; border-radius: 18px;
+  color: #f9e5b1; background: rgba(28, 36, 61, .93);
+  box-shadow: 0 3px 12px #0003; cursor: pointer; font: inherit; font-size: 13px;
+}
+.bgm-toggle[aria-pressed="true"] { background: #345950; }
+.bgm-toggle:focus-visible { outline: 3px solid #fff0ba; outline-offset: 3px; }
+.bgm-toggle:disabled { opacity: .65; cursor: wait; }
