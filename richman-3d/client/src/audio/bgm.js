@@ -18,7 +18,7 @@ export function initBgm() {
   const updateVolume = () => {
     // 仅调节音量，不触发播放；关闭音乐期间也能预先设置。
     audio.volume = Number(slider.value) / 100;
-    caption.textContent = `音乐音量 ${slider.value}%`;
+    caption.textContent = `音量 ${slider.value}%`;
     slider.setAttribute('aria-valuetext', `${slider.value}%`);
   };
   slider.addEventListener('input', updateVolume);
@@ -30,7 +30,7 @@ export function initBgm() {
   button.title = '播放或暂停《朋友的酒》，仅自己听到';
   const render = () => {
     const playing = !audio.paused;
-    button.textContent = playing ? '♫ 背景音乐：开' : '♫ 背景音乐：关';
+    button.textContent = playing ? '音乐：开' : '音乐：关';
     button.setAttribute('aria-pressed', String(playing));
     button.setAttribute('aria-label', playing ? '关闭背景音乐《朋友的酒》' : '播放背景音乐《朋友的酒》');
   };

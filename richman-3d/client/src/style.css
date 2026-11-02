@@ -412,21 +412,20 @@ body {
 .listening-controls input { min-width: 60px; width: 90px; flex: 1; accent-color: #e9bd65; }
 .listening-controls button[aria-pressed="true"] { color: #ffbd9d; border-color: #c77b68; }
 
-/* 背景音乐音量置于开关上方，兼容手机底部安全区。 */
+/* 简洁的背景音乐控件：上方音量，下方开关。 */
 .bgm-panel {
-  position: fixed; left: max(14px, env(safe-area-inset-left));
-  bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 90;
-  display: flex; flex-direction: column; gap: 7px; width: 172px;
+  position: fixed; left: max(12px, env(safe-area-inset-left));
+  bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 90;
+  display: flex; flex-direction: column; gap: 4px; width: 124px;
+  padding: 8px; border-radius: 8px; background: rgba(28, 36, 61, .88);
+  color: #f9e5b1; font-size: 11px;
 }
-.bgm-toggle, .bgm-volume {
-  padding: 10px 14px; border: 1px solid #e4c477; border-radius: 18px;
-  color: #f9e5b1; background: rgba(28, 36, 61, .93);
-  box-shadow: 0 3px 12px #0003; cursor: pointer; font: inherit; font-size: 13px;
+.bgm-volume { display: flex; flex-direction: column; gap: 2px; }
+.bgm-volume input { width: 100%; margin: 0; accent-color: #e9bd65; cursor: pointer; }
+.bgm-toggle {
+  padding: 5px 4px; border: 0; border-radius: 4px;
+  color: inherit; background: #ffffff12; cursor: pointer; font: inherit;
 }
 .bgm-toggle[aria-pressed="true"] { background: #345950; }
-.bgm-toggle:focus-visible { outline: 3px solid #fff0ba; outline-offset: 3px; }
 .bgm-toggle:disabled { opacity: .65; cursor: wait; }
-
-.bgm-volume { display: flex; flex-direction: column; gap: 5px; cursor: default; }
-.bgm-volume input { width: 100%; margin: 0; accent-color: #e9bd65; cursor: pointer; }
-.bgm-volume input:focus-visible { outline: 2px solid #fff0ba; outline-offset: 3px; }
+.bgm-toggle:focus-visible, .bgm-volume input:focus-visible { outline: 2px solid #fff0ba; outline-offset: 2px; }
