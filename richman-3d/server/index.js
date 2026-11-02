@@ -136,10 +136,15 @@ io.on('connection', (socket) => {
     const room = rooms.rooms.get(roomCode);
     if (!room) return;
     socket.to(room.code).emit('voice:peer-joined', { peer: socket.id });
-    socket.emit('voice:peers', { peers: room.players.filter((p) => p.sid !== socket.id).map((p) => p.sid) });
+    socket.emit('voice:peers', { peers: room.players.filter((p) => p.sid !== socket.id && !p.disconnected).map((p) => p.sid) });
   });
   socket.on('voice:signal', ({ to, data } = {}) => {
-    if (to) io.to(to).emit('voice:signal', { from: socket.id, data });
+    const room = rooms.rooms.get(roomCode);
+    // 只允许向当前房间的在线队友转发，避免旧 sid/跨房间信令干扰。
+    if (room?.players.some(p => p.sid === socket.id && !p.disconnected) &&
+        room.players.some(p => p.sid === to && !p.disconnected)) {
+      io.to(to).emit('voice:signal', { from: socket.id, data });
+    }
   });
   socket.on('voice:mute', ({ muted }) => {
     const room = rooms.rooms.get(roomCode);

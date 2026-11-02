@@ -29,5 +29,13 @@ export function listeningControls(player) {
   mute.onclick = () => { voice.setListening(player.id, { muted: !voice.listening.get(player.id).muted }); refresh(); };
   box.title = '只影响你听到的声音，不会关闭队友的麦克风';
   label.append(caption, slider); box.append(label, mute); refresh();
+  const status = document.createElement('span');
+  status.dataset.voiceStatus = player.sid;
+  status.textContent = `语音：${voice.getStatus(player.sid)}`;
+  status.setAttribute('aria-live', 'polite');
+  const retry = document.createElement('button');
+  retry.type = 'button'; retry.className = 'btn btn-mini'; retry.textContent = '重试语音';
+  retry.onclick = () => { voice.resumeAll(); voice.retryPeer(player.sid); };
+  box.append(status, retry);
   return box;
 }

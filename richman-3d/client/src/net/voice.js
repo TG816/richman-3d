@@ -36,7 +36,7 @@ const MIC_CONSTRAINTS = {
 // ICE 断线恢复参数（业界分层恢复阶梯）
 const DISCONNECT_WAIT_MS = 4000; // disconnected 后先等 4 秒看能否自动恢复，避免短暂抖动就 restart
 const RESTART_DEADLINE_MS = 5000; // 一次 ICE restart 的硬截止，超时仍未恢复则升级
-const MAX_RESTARTS = 2;           // 同一连接最多连续 restart 次数，超过则强制 socket 完整重连
+const MAX_RESTARTS = 2;           // 同一连接最多连续 restart 次数，超过则仅停止该队友的自动重试
 const LOWPASS_FREQ = 8000;        // 发送低通截止频率（Hz）：人声能量主要在 8k 以下，更高的尖锐噪声/嘶声被滤除
 
 class Voice {
@@ -53,6 +53,8 @@ class Voice {
     this.open = false;
     this._toggling = false;      // 开/关麦进行中标志：防止快速点击重复 getUserMedia
     this._pending = new Map();   // sid -> [candidate]（远端描述就绪前缓存）
+    this.helloKey = null;
+    this.statuses = new Map();
     this.socketOffline = false;  // 信令 socket 是否处于断线状态（用于重连后重建）
   }
 
@@ -86,7 +88,16 @@ class Voice {
       const code = store.room?.code ?? null;
       if (code !== this.listeningRoom) { this.listening.clear(); this.listeningRoom = code; }
       this.applyListening();
-      if (store.room && socket.connected) socket.emit('voice:hello');
+      // 房间快照频繁广播，只有本机进入/重连时发送一次 hello。
+      const online = new Set((store.room?.players || []).filter(p => !p.disconnected).map(p => p.sid));
+      for (const sid of this.peers.keys()) if (!online.has(sid)) this.dropPeer(sid);
+      const key = code && socket.connected ? `${code}:${socket.id}` : null;
+      if (key !== this.helloKey) {
+        this.resetPeers();
+        this.helloKey = key;
+        if (key) socket.emit('voice:hello');
+      }
+      this.renderStatuses();
     });
 
     socket.on('voice:peers', ({ peers }) => {
@@ -96,6 +107,7 @@ class Voice {
 
     socket.on('voice:signal', async ({ from, data }) => {
       try {
+        if (!store.room?.players.some(p => p.sid === from && !p.disconnected)) return;
         let pc = this.peers.get(from);
         if (data.sdp?.type === 'offer') {
           pc ||= this.connectTo(from, false);
@@ -111,6 +123,12 @@ class Voice {
         } else if (data.candidate) {
           if (pc?.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
           else this._pending.set(from, [...(this._pending.get(from) || []), data.candidate]);
+        } else if (data.retry) {
+          // 用户手动重试时同时重置 offer 方预算，避免只重置本端而无法恢复。
+          if (pc?._initiator && !pc._restarting) {
+            pc._restartAttempts = 0;
+            this.restartIce(from);
+          }
         } else if (data.restart) {
           this.restartIce(from); // 对端请求本方（offer 方）执行 ICE restart
         }
@@ -122,6 +140,7 @@ class Voice {
     socket.on('disconnect', () => {
       // 不立即销毁：Socket.IO 会自动重连，标记离线等待；媒体连接在重连后统一重建
       this.socketOffline = true;
+      this.helloKey = null;
       toast('网络断开，正在重连…', true);
     });
 
@@ -143,7 +162,7 @@ class Voice {
   /** 手势触发：重播被自动播放策略挂起的 audio，并恢复分析用 context */
   resumeAll() {
     for (const audio of this.audios.values()) {
-      if (audio.paused) audio.play().catch(() => {});
+      if (audio.paused) this.playAudio(audio.dataset.sid, audio);
     }
     for (const rec of this.analysers.values()) {
       rec.ctx.resume().catch(() => {});
@@ -173,9 +192,11 @@ class Voice {
   }
 
   connectTo(sid, initiator) {
+    if (sid === socket.id || !store.room?.players.some(p => p.sid === sid && !p.disconnected)) return null;
     if (this.peers.has(sid)) return this.peers.get(sid);
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.peers.set(sid, pc);
+    this.setStatus(sid, '连接中');
 
     pc.addTrack(this.micTrack || this.silentTrack(), this.micTrack ? new MediaStream([this.micTrack]) : new MediaStream([this.silentTrack()]));
 
@@ -194,7 +215,7 @@ class Voice {
       }
       audio.srcObject = e.streams[0];
       this.applyListening();
-      audio.play?.().catch(() => {});
+      this.playAudio(sid, audio);
     };
     pc._initiator = initiator; // 记录 offer 方：ICE restart 只由该端发起，避免双 offer 冲突
     pc._disconnectTimer = null;
@@ -202,7 +223,13 @@ class Voice {
     pc.oniceconnectionstatechange = () => {
       const st = pc.iceConnectionState;
       clearTimeout(pc._disconnectTimer);
-      if (st === 'connected' || st === 'completed' || st === 'checking') { pc._restartAttempts = 0; return; } // 已恢复/检查中
+      if (this.peers.get(sid) !== pc) return;
+      if (st === 'connected' || st === 'completed') {
+        pc._restartAttempts = 0;
+        this.setStatus(sid, this.audios.get(sid)?.paused ? '点击页面启用播放' : '已连接');
+        return;
+      }
+      if (st === 'checking') { this.setStatus(sid, '连接中'); return; } // 检查中不是恢复成功，不能清零重试次数
       if (st === 'disconnected') {
         // disconnected 多为临时抖动：先等待自动恢复，不立即 restart（否则会把轻微抖动放大成可见中断）
         pc._disconnectTimer = setTimeout(() => {
@@ -235,14 +262,34 @@ class Voice {
   /** 统一发起 restart 请求：offer 方自己 restart，非 offer 方请对方代发起 */
   requestRestart(sid) {
     const pc = this.peers.get(sid);
-    if (!pc || pc._restarting) return;
+    if (!pc || pc._restarting || pc._restartAttempts >= MAX_RESTARTS || !socket.connected) return;
     if (pc._initiator) this.restartIce(sid);
-    else socket.emit('voice:signal', { to: sid, data: { restart: true } });
+    else {
+      pc._restartAttempts += 1;
+      this.setStatus(sid, '语音重试中');
+      socket.emit('voice:signal', { to: sid, data: { restart: true } });
+      pc._disconnectTimer = setTimeout(() => {
+        if (this.peers.get(sid) !== pc || ['connected', 'completed'].includes(pc.iceConnectionState)) return;
+        if (pc._restartAttempts >= MAX_RESTARTS) this.setStatus(sid, '连接失败，可重试');
+        else this.requestRestart(sid);
+      }, RESTART_DEADLINE_MS);
+    }
   }
 
   dropPeer(sid) {
-    this.peers.get(sid)?.close();
-    this.peers.delete(sid);
+    const pc = this.peers.get(sid);
+    this.peers.delete(sid); // 先删除，再关闭，避免 closed 回调重复清理
+    if (pc) {
+      clearTimeout(pc._disconnectTimer);
+      pc.oniceconnectionstatechange = null;
+      pc.onconnectionstatechange = null;
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.onnegotiationneeded = null;
+      pc.close();
+    }
+    this._pending.delete(sid);
+    this.statuses.delete(sid);
     this.audios.get(sid)?.remove();
     this.audios.delete(sid);
     const rec = this.analysers.get(sid);
@@ -253,14 +300,17 @@ class Voice {
   /** ICE 失败后重新协商恢复（仅 offer 方调用，复用现有 offer/answer 信令）；带硬截止与升级 */
   async restartIce(sid) {
     const pc = this.peers.get(sid);
-    if (!pc || pc._restarting) return;
-    if (pc._restartAttempts >= MAX_RESTARTS) return this.fullReconnect(); // 连续 restart 救不回，升级
+    if (!pc || pc._restarting || !socket.connected) return;
+    if (!pc._initiator) return this.requestRestart(sid);
+    if (pc._restartAttempts >= MAX_RESTARTS) return this.setStatus(sid, '连接失败，可重试');
+    this.setStatus(sid, '语音重试中');
     pc._restartAttempts += 1;
     pc._restarting = true;
     let deadline;
     try {
       // iceRestart 生成新的 ufrag/pwd，强制重新收集候选并检查连通性；对端走常规 offer 分支回 answer
       const offer = await pc.createOffer({ iceRestart: true });
+      if (this.peers.get(sid) !== pc) return;
       await pc.setLocalDescription(offer);
       socket.emit('voice:signal', { to: sid, data: { sdp: pc.localDescription } });
       await new Promise((resolve) => { deadline = setTimeout(resolve, RESTART_DEADLINE_MS); }); // 硬截止
@@ -270,18 +320,49 @@ class Voice {
       clearTimeout(deadline);
       pc._restarting = false; // 先释放防重入锁，下面才能触发下一轮
     }
-    // 到点仍未恢复则触发下一轮（_restarting 已释放）；attempts 达上限后 requestRestart 路径会升级到 fullReconnect
+    // 到点仍未恢复则触发下一轮（_restarting 已释放）；达到上限后只提示此队友失败，保留游戏与其他队友连接
     if (this.peers.get(sid) === pc && !['connected', 'completed'].includes(pc.iceConnectionState)) {
-      this.requestRestart(sid);
+      if (pc._restartAttempts >= MAX_RESTARTS) this.setStatus(sid, '连接失败，可重试');
+      else this.requestRestart(sid);
     }
   }
 
-  /** Tier 2：ICE restart 无法恢复时，强制信令 socket 重连，走完整 rejoin + 重新建链 */
-  fullReconnect() {
-    toast('连接不稳定，正在重新建立…', true);
-    this.resetPeers();
-    if (socket.connected) { socket.disconnect(); socket.connect(); }
-    else socket.connect();
+  /** 单独重试此队友，绝不操作游戏 Socket.IO 连接。 */
+  retryPeer(sid) {
+    const pc = this.peers.get(sid);
+    if (!pc || pc._restarting) return;
+    pc._restartAttempts = 0;
+    if (!pc._initiator && socket.connected) socket.emit('voice:signal', { to: sid, data: { retry: true } });
+    clearTimeout(pc._disconnectTimer);
+    this.requestRestart(sid);
+  }
+
+  getStatus(sid) {
+    const player = store.room?.players.find(p => p.sid === sid);
+    if (player?.disconnected) return '队友离线';
+    if (!socket.connected) return '游戏连接中断';
+    return this.statuses.get(sid) || '等待连接';
+  }
+
+  setStatus(sid, text) {
+    this.statuses.set(sid, text);
+    this.renderStatuses();
+  }
+
+  renderStatuses() {
+    for (const el of document.querySelectorAll('[data-voice-status]')) {
+      el.textContent = `语音：${this.getStatus(el.dataset.voiceStatus)}`;
+    }
+  }
+
+  async playAudio(sid, audio) {
+    try {
+      await audio.play();
+      if (this.audios.get(sid) === audio && ['connected', 'completed'].includes(this.peers.get(sid)?.iceConnectionState)) this.setStatus(sid, '已连接');
+    } catch (err) {
+      if (this.audios.get(sid) !== audio) return;
+      this.setStatus(sid, err.name === 'NotAllowedError' ? '播放被阻止，请点击页面' : '音频播放失败');
+    }
   }
 
   /** 首次开麦：getUserMedia 取原始轨，经 lowpass 处理得发送轨，再热替换进所有连接 */
@@ -345,6 +426,8 @@ class Voice {
   }
 
   teardown() {
+    this.helloKey = null;
+    this._pending.clear();
     for (const sid of [...this.peers.keys()]) this.dropPeer(sid);
     this.stopMicPipeline();
     try { this._silentCtx?.close(); } catch { /* ignore */ } // 关闭静音占位轨的 AudioContext
