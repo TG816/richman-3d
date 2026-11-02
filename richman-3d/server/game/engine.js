@@ -459,9 +459,9 @@ export class GameEngine {
     this.emit({ type: 'turn', player: this.players[this.turn].id, round: this.round });
   }
 
-  finishByAssets() {
-    const worth = (p) =>
-      p.money +
+  /** 统一结算口径：现金 + 地产价值（抵押减半）+ 建筑投入。 */
+  totalAssets(p) {
+    return p.money +
       Object.entries(this.props)
         .filter(([, info]) => info.owner === p.id)
         .reduce((s, [idx, info]) => {
@@ -471,6 +471,10 @@ export class GameEngine {
           const hc = t.type === 'prop' ? GROUPS[t.group].houseCost : 0;
           return s + base + houses * hc;
         }, 0);
+  }
+
+  finishByAssets() {
+    const worth = (p) => this.totalAssets(p);
     const alive = this.players.filter((p) => !p.bankrupt).sort((a, b) => worth(b) - worth(a));
     this.winner = alive[0] || null;
     this.phase = 'gameover';
@@ -490,7 +494,7 @@ export class GameEngine {
     this.winner = alive[0] || null;
     this.phase = 'gameover';
     this.addLog(this.winner ? `🏆 ${this.winner.name} 笑到最后，赢得整场对局！` : '全员破产，无人幸存……');
-    this.lastRanking = alive.map((p) => ({ id: p.id, worth: p.money }));
+    this.lastRanking = alive.map((p) => ({ id: p.id, worth: this.totalAssets(p) }));
     this.emit({
       type: 'win',
       winner: this.winner?.id ?? null,
