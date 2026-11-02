@@ -6,18 +6,21 @@ export function listeningControls(player) {
   const box = document.createElement('div');
   box.className = 'listening-controls';
   if (player.id === store.me?.id) return box;
-  const setting = voice.listening.get(player.id);
   const label = document.createElement('label');
   const caption = document.createElement('span');
   const slider = document.createElement('input');
   slider.type = 'range'; slider.min = '0'; slider.max = '100'; slider.step = '1';
-  slider.value = String(Math.round(setting.volume * 100));
   slider.setAttribute('aria-label', `${player.name} 的本地收听音量`);
   const mute = document.createElement('button');
   mute.type = 'button'; mute.className = 'btn btn-mini';
   const refresh = () => {
     const current = voice.listening.get(player.id);
-    caption.textContent = `收听 ${Math.round(current.volume * 100)}%`;
+    // 静音只改变显示和播放状态，保留原音量供解除静音时恢复。
+    const percent = current.muted ? 0 : Math.round(current.volume * 100);
+    slider.value = String(percent);
+    slider.disabled = current.muted;
+    caption.textContent = `收听 ${percent}%`;
+    slider.title = current.muted ? '取消本地静音后恢复原音量' : '调整此队友的收听音量';
     mute.textContent = current.muted ? '取消本地静音' : '本地静音';
     mute.setAttribute('aria-pressed', String(current.muted));
     mute.setAttribute('aria-label', `${player.name}：${mute.textContent}`);
