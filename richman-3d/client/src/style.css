@@ -429,3 +429,13 @@ body {
 .bgm-toggle[aria-pressed="true"] { background: #345950; }
 .bgm-toggle:disabled { opacity: .65; cursor: wait; }
 .bgm-toggle:focus-visible, .bgm-volume input:focus-visible { outline: 2px solid #fff0ba; outline-offset: 2px; }
+
+/* 固定点数提示避开左右玩家面板，不拦截棋盘操作。 */
+.dice-result {
+  position: fixed; top: calc(72px + env(safe-area-inset-top)); left: 50%;
+  transform: translateX(-50%); z-index: 45; pointer-events: none;
+  max-width: calc(100vw - 28px); padding: 9px 16px; border-radius: 12px;
+  background: rgba(28, 36, 61, .94); color: #fff0ba; border: 1px solid #e4c477;
+  font-size: 17px; font-weight: 700; text-align: center; overflow-wrap: anywhere;
+}
+@media (max-width: 600px) { .dice-result { top: calc(90px + env(safe-area-inset-top)); font-size: 14px; padding: 7px 10px; } }

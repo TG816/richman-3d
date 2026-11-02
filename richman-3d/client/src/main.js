@@ -1,3 +1,4 @@
+import { createDiceResult } from './ui/dice-result.js';
 import { initBgm } from './audio/bgm.js';
 import * as THREE from 'three';
 import { createScene } from './three/scene.js';
@@ -20,6 +21,7 @@ const scene3 = createScene(canvas);
 const board = buildBoard(scene3.scene);
 const tokens = new Tokens(scene3.scene);
 const dice = new Dice(scene3.scene);
+const diceResult = createDiceResult();
 const effects = new Effects(scene3.scene);
 scene3.tickers.push((dt) => dice.update(dt));
 scene3.tickers.push((dt) => effects.update(dt));
@@ -67,6 +69,7 @@ document.getElementById('btnMic').onclick = async (e) => {
 
 /* 换房间时清空旧房间残留（动画队列、弹窗、高亮） */
 onBus('room-switch', () => {
+  diceResult.hide();
   framedOnce = false;
   director.queue.length = 0;
   director.busy = false;
@@ -288,6 +291,7 @@ class Director {
   /** 快进：跳过动画直取结果（标签页休眠积压 / 长队尾） */
   applyInstant(e) {
     switch (e.type) {
+      case 'dice': diceResult.show(this.nameOf(e.player), e.dice); break;
       case 'move': tokens.snapTo(e.player, e.path[e.path.length - 1]); break;
       case 'jail': tokens.snapTo(e.player, 10); break;
       case 'buy': {
@@ -319,6 +323,7 @@ class Director {
     const fmtMoney = (n) => '¥' + n.toLocaleString('en-US');
     switch (e.type) {
       case 'dice': {
+        diceResult.rolling(this.nameOf(e.player));
         // 骰子掷在当前角色身旁的街面上
         const rec = tokens.map.get(e.player);
         if (rec) {
@@ -328,6 +333,7 @@ class Director {
           scene3.focusOn(new THREE.Vector3(base.x, 0.4, base.z));
         }
         await dice.roll(e.dice);
+        if (store.room) diceResult.show(this.nameOf(e.player), e.dice);
         break;
       }
       case 'move': {

@@ -36,6 +36,8 @@ export class Dice {
   roll(values) {
     return new Promise((resolve) => {
       this.group.visible = true;
+      this.settleFrom = null;
+      this.dice.forEach(d => { d.lastClack = 0; });
       sfx.dice();
       const targets = values.map((v, i) => {
         const q = new THREE.Quaternion().setFromUnitVectors(FACE_NORMALS[v], UP);
@@ -103,10 +105,13 @@ function makeDie() {
   // BoxGeometry 材质顺序：+x,-x,+y,-y,+z,-z → 3,4,1,6,2,5
   const order = [3, 4, 1, 6, 2, 5];
   const mats = order.map((v) => new THREE.MeshStandardMaterial({
+    // 交互骰子优先显示，避免被房屋、角色及道路深度遮挡。
+    depthTest: false, depthWrite: false,
     color: 0xf7f3e8, roughness: 0.25, metalness: 0.05, map: pipTextures[v],
   }));
   const mesh = new THREE.Mesh(geo, mats);
   mesh.castShadow = true;
+  mesh.renderOrder = 1000;
   return { mesh, lastClack: 0 };
 }
 

@@ -208,3 +208,10 @@ CDN 可达性）的调研结论。视觉资产和游戏音效程序化生成；�
 实现：`client/src/audio/bgm.js` 的 `initBgm`；素材：`client/public/music/peng-you-de-jiu.mp3`（用户提供）。
 
 背景音乐开关上方提供 0–100% 音量滑块，初始 25%；关闭时调节不会自动播放，暂停再开启会保留当前音量，刷新后恢复默认。
+
+
+### 骰子可读性改进（yr 模块）
+
+3D 骰子优先绘制，不受建筑和角色深度遮挡；屏幕顶部在掷骰时提示正在投掷，结束后显示玩家、两个点数及合计。
+提示沿用服务端结果，在移动后保留到下一次掷骰，换房清除；动画快进仍显示点数。
+实现：`client/src/three/dice.js`、`client/src/ui/dice-result.js`、`client/src/main.js` 事件导演。
