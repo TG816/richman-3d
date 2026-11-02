@@ -20,7 +20,7 @@ const canvas = document.getElementById('gl');
 const scene3 = createScene(canvas);
 const board = buildBoard(scene3.scene);
 const tokens = new Tokens(scene3.scene);
-const dice = new Dice(scene3.scene);
+const dice = new Dice();
 const diceResult = createDiceResult();
 const effects = new Effects(scene3.scene);
 scene3.tickers.push((dt) => dice.update(dt));
@@ -324,14 +324,6 @@ class Director {
     switch (e.type) {
       case 'dice': {
         diceResult.rolling(this.nameOf(e.player));
-        // 骰子掷在当前角色身旁的街面上
-        const rec = tokens.map.get(e.player);
-        if (rec) {
-          const { t } = cellDirs(rec.tile);
-          const base = tileWorldPos(rec.tile, 0);
-          dice.group.position.set(base.x + t.x * 0.8, -0.15, base.z + t.z * 0.8);
-          scene3.focusOn(new THREE.Vector3(base.x, 0.4, base.z));
-        }
         await dice.roll(e.dice);
         if (store.room) diceResult.show(this.nameOf(e.player), e.dice);
         break;

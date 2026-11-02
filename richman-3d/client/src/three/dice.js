@@ -17,12 +17,30 @@ const FACE_NORMALS = {
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class Dice {
-  constructor(scene) {
+  constructor() {
+    // 骰子使用独立场景和画布，建筑、人物及棋盘后期均不会遮住骰面。
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.OrthographicCamera(-2.8, 2.8, 2.1, -2.1, .1, 30);
+    this.camera.position.set(0, 9, 5);
+    this.camera.lookAt(0, .8, 0);
+    this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(196, 147);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xa2a8b8, 2));
+    const light = new THREE.DirectionalLight(0xffffff, 2);
+    light.position.set(3, 8, 5); this.scene.add(light);
+    this.panel = document.createElement('div');
+    this.panel.className = 'dice-preview hidden';
+    this.panel.setAttribute('aria-label', '本次三维掷骰动画');
+    const label = document.createElement('div'); label.textContent = '本次骰子';
+    this.panel.append(label, this.renderer.domElement);
+    document.body.appendChild(this.panel);
     this.group = new THREE.Group();
-    this.group.position.set(0, 0.5, 0);
-    this.group.scale.setScalar(0.55); // 骰子相对 Q 版角色不宜过大
+    this.group.position.set(0, 0, 0);
+    this.group.scale.setScalar(1);
     this.group.visible = false;
-    scene.add(this.group);
+    this.scene.add(this.group);
     this.dice = [makeDie(), makeDie()];
     this.dice[0].mesh.position.x = -0.75;
     this.dice[1].mesh.position.x = 0.75;
@@ -36,6 +54,7 @@ export class Dice {
   roll(values) {
     return new Promise((resolve) => {
       this.group.visible = true;
+      this.panel.classList.remove('hidden');
       this.settleFrom = null;
       this.dice.forEach(d => { d.lastClack = 0; });
       sfx.dice();
@@ -55,9 +74,10 @@ export class Dice {
     });
   }
 
-  hide() { this.group.visible = false; }
+  hide() { this.group.visible = false; this.panel.classList.add('hidden'); }
 
   update(dt) {
+    if (this.group.visible) this.renderer.render(this.scene, this.camera);
     if (!this.anim) return;
     const a = this.anim;
     a.t += dt;
@@ -105,13 +125,11 @@ function makeDie() {
   // BoxGeometry 材质顺序：+x,-x,+y,-y,+z,-z → 3,4,1,6,2,5
   const order = [3, 4, 1, 6, 2, 5];
   const mats = order.map((v) => new THREE.MeshStandardMaterial({
-    // 交互骰子优先显示，避免被房屋、角色及道路深度遮挡。
-    depthTest: false, depthWrite: false,
     color: 0xf7f3e8, roughness: 0.25, metalness: 0.05, map: pipTextures[v],
   }));
   const mesh = new THREE.Mesh(geo, mats);
   mesh.castShadow = true;
-  mesh.renderOrder = 1000;
+
   return { mesh, lastClack: 0 };
 }
 
