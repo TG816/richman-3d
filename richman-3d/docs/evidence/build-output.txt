@@ -1,0 +1,24 @@
+
+> richman-3d@1.0.0 build
+> vite build client
+
+vite v6.4.5 building for production...
+transforming...
+✓ 66 modules transformed.
+[plugin vite:reporter] 
+(!) E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/audio/sfx.js is dynamically imported by E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/ui/chat.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/ui/lobby.js but also statically imported by E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/main.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/three/dice.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/three/tokens.js, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/net/socket.js is dynamically imported by E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/main.js but also statically imported by E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/main.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/net/voice.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/ui/chat.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/ui/hud.js, E:/code_2/朋友的软件工程项目/richman-3d/richman-3d/client/src/ui/lobby.js, dynamic import will not move module into another chunk.
+
+rendering chunks...
+computing gzip size...
+dist/index.html                   7.35 kB │ gzip:   2.53 kB
+dist/assets/index-Cccp3VTh.css   15.96 kB │ gzip:   4.39 kB
+dist/assets/index-x_9JwFE5.js   662.68 kB │ gzip: 176.83 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1.72s

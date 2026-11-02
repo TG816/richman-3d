@@ -1,0 +1,43 @@
+9aba7ae | yr | 调整骰子为当前地图格子上方悬空投掷（yr）
+e605165 | yr | 改用独立三维骰子窗口，消除棋盘建筑遮挡（yr）
+0c6f211 | waz | 修复出狱卡重复流转与归还牌库错误并完善存档（waz）
+332c0de | waz | 统一两种终局的总资产计算并补充结算测试（waz）
+bd9b1b5 | waz | 修复双数出狱购地后错误再掷骰并补充回归测试（waz）
+9aece78 | yr | 调整骰子点数至底部回合提示上方，避免覆盖公告（yr）
+0fff93a | yr | 修复骰子点数提示遮挡：自动避让顶部玩家界面（yr）
+4cd4399 | yr | 改善骰子可读性：防止场景遮挡并显示固定点数提示（yr）
+f22ef6f | gsl | 简化背景音乐控件并缩小按钮与滑块（gsl）
+e588d1e | gsl | 新增背景音乐音量滑块并保持独立播放开关（gsl）
+69d01b8 | gsl | 新增默认关闭的背景音乐开关与朋友的酒音频（gsl）
+3f54bb6 | gsl | 完善本地静音交互：滑块归零并在解除时恢复原音量
+5a9f303 | gsl | 修复本地静音未生效：补齐玩家语音连接映射并验证重连
+5ac6c5d | gsl | 新增队友独立收听音量与本地静音控制（gsl）
+f7a2614 | dhz | 合并语音资源清理更新与落点升级规则修复
+b080326 | yr | 回退房间码复制修改：恢复邀请链接便于对比
+184cb76 | yr | 修复房间码复制：复制纯房间码并兼容剪贴板接口
+ce5b91d | waz | 修复地产升级规则：仅再次落地时允许升级一级
+b61ad43 | dhz | voice: teardown on pagehide and close silent AudioContext to prevent resource leaks
+a7a8137 | dhz | voice: debounce mic toggle + lowpass 8kHz to cut high-frequency noise
+19cea9d | dhz | voice: layered reconnect ladder (disconnected wait, ICE restart deadline, full rejoin) + 60s grace
+954d54c | dhz | voice: auto ICE restart on failure instead of dropping peer
+19926b0 | dhz | voice: keep strong mic constraints, revert playback to audio element
+2ba115b | dhz | voice: stronger mic constraints, Web Audio gain and unified receive graph
+8c17596 | dhz | voice: listen room event on store bus instead of socket
+97c4360 | dhz | voice: fix null currentTarget after await; self-hosted coturn; resume on gesture
+1e70bbf | dhz | voice: use self-hosted coturn on Aliyun ECS
+b5ae1ff | dhz | fix(server): 重连补发对局状态改在 ack 之后，避免客户端竞态丢包 (dhz)
+df83ff4 | yr | feat(3d): 参考大富翁4重做呈现——蛇形街区世界/局部跟随镜头/Q版行走小人/地上盖楼逐层长高 (yr)
+5212414 | dhz | chore: 添加 socket.io-client 前端依赖 (dhz)
+e1f316f | dhz | fix(server): 切房自动离开旧房间+广播携带房间标记，杜绝跨房事件串流 (dhz)
+3ec6e3c | dhz | fix(client): 每次重连都向服务器对齐房间状态；动画播完再亮操作按钮 (dhz)
+e845a6b | gsl | fix(chat/voice): 系统消息渲染与语音进房信令时机修复——实测 P2P 建链成功 (gsl)
+b795dc7 | waz | fix(engine): 修正买地/建房/抵押/赎回五处资金方向并增加银行流水守恒校验 (waz)
+cdc6e74 | gsl | feat(voice): WebRTC 实时语音——静音占位轨+replaceTrack 免重协商 (gsl)
+5d36f67 | yr | feat(ui): 大厅/HUD/操作面板/地契卡/结算与聊天界面 (yr)
+09995b1 | dhz | feat(client): 网络层与事件导演——断线重连同席恢复/动画队列/状态同步 (dhz)
+dea4971 | yr | feat(3d): 星夜都会 3D 场景——程序化棋盘/机器人棋子/骰子动画/Bloom 后期/飘字彩带 (yr)
+2083c25 | waz | test(engine): 200 局随机对局回归测试，验证状态机不卡死 (waz)
+63263ff | waz | feat(engine): 大富翁规则引擎——40格中国城市棋盘/买地/租金/建房/抵押/卡片/破产 (waz)
+9982635 | dhz | feat(server): 房间系统、回合计时、Socket.IO 实时协议与 REST 预留接口 (dhz)
+bceb962 | dhz | chore(scaffold): Vite + Express + Socket.IO + Three.js 脚手架与依赖 (dhz)
+7adefef | dhz | docs: 项目需求与 API/资源调研报告 (dhz)
